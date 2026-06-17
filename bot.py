@@ -619,6 +619,7 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
 
     _add_column_if_missing(conn, "disputes", "ref_id", "TEXT")
     _add_column_if_missing(conn, "disputes", "admin_note", "TEXT")
+    _add_column_if_missing(conn, "disputes", "admin_seen_message_id", "INTEGER NOT NULL DEFAULT 0")
     try:
         rows = conn.execute("SELECT id FROM disputes WHERE ref_id IS NULL OR ref_id = ''").fetchall()
         for row in rows:
@@ -1009,7 +1010,8 @@ def init_db() -> None:
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TEXT NOT NULL,
                 resolved_at TEXT,
-                admin_note TEXT
+                admin_note TEXT,
+                admin_seen_message_id INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS dispute_messages (
@@ -1920,6 +1922,34 @@ def settle_photo_wallets(public_id: str, status: str) -> None:
         conn.commit()
 
 
+def normalize_admin_order_status(value: object) -> str:
+    """Return the internal QR status value accepted by admin override forms.
+
+    Older/mobile browsers, custom buttons, or copied UI labels may submit values such as
+    "✅ Done", "❌ Failed", "Done → Failed", or "mark_failed" instead of the exact
+    internal database values.  Keep the public UI forgiving while storing only canonical
+    values in the database.  If both Done and Failed appear in one label, the last
+    matching word wins, so "Done → Failed" becomes "failed".
+    """
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    compact = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    done_words = {"done", "complete", "completed", "success", "successful", "ok", "approved"}
+    failed_words = {"failed", "fail", "failure", "rejected", "reject", "cancelled", "canceled"}
+    matches: list[tuple[int, str]] = []
+    for word in done_words:
+        idx = compact.rfind(word)
+        if idx >= 0:
+            matches.append((idx, "done"))
+    for word in failed_words:
+        idx = compact.rfind(word)
+        if idx >= 0:
+            matches.append((idx, "failed"))
+    if not matches:
+        return ""
+    return max(matches, key=lambda item: item[0])[1]
+
 def admin_override_photo_status(public_id: str, new_status: str, *, failure_reason: str | None = None, status_by: int | None = None) -> tuple[bool, str, dict | None]:
     """Change any QR order status from the admin panel and keep wallet balances in sync.
 
@@ -1930,7 +1960,7 @@ def admin_override_photo_status(public_id: str, new_status: str, *, failure_reas
     - failed -> done: charge the sender again and credit the receiver.
     """
     public_id = str(public_id or "").strip()
-    target_status = str(new_status or "").strip().lower()
+    target_status = normalize_admin_order_status(new_status)
     if not public_id:
         return False, "QR ID is missing.", None
     if target_status not in {"done", "failed"}:
@@ -2599,12 +2629,28 @@ def list_dispute_chat_messages(dispute_id: int) -> list[sqlite3.Row]:
         return conn.execute("SELECT * FROM dispute_messages WHERE dispute_id = ? ORDER BY created_at ASC, id ASC", (dispute_id,)).fetchall()
 
 
-def dispute_chat_html(dispute_id: int) -> str:
+def latest_dispute_message_id(dispute_id: int) -> int:
+    with get_conn() as conn:
+        row = conn.execute("SELECT COALESCE(MAX(id), 0) AS latest_id FROM dispute_messages WHERE dispute_id = ?", (dispute_id,)).fetchone()
+    return int(row["latest_id"] or 0) if row else 0
+
+
+def mark_dispute_admin_seen(dispute_id: int) -> int:
+    latest_id = latest_dispute_message_id(dispute_id)
+    with get_conn() as conn:
+        conn.execute("UPDATE disputes SET admin_seen_message_id = ? WHERE id = ?", (latest_id, dispute_id))
+    return latest_id
+
+
+def dispute_chat_html(dispute_id: int, limit: int | None = 100) -> str:
     messages = list_dispute_chat_messages(dispute_id)
     if not messages:
         return '<div class="muted">No chat messages yet.</div>'
+    shown_messages = messages[-limit:] if limit and len(messages) > limit else messages
     out = ['<div class="dispute-chat-log">']
-    for msg in messages[-20:]:
+    if limit and len(messages) > limit:
+        out.append(f'<div class="muted small">Showing latest {limit} of {len(messages)} messages.</div>')
+    for msg in shown_messages:
         side = 'Admin' if str(msg['sender_type']) == 'admin' else 'User'
         cls = 'admin' if str(msg['sender_type']) == 'admin' else 'user'
         out.append(
@@ -2614,8 +2660,6 @@ def dispute_chat_html(dispute_id: int) -> str:
             f'<div>{esc(msg["message"])}</div>'
             f'</div>'
         )
-    if len(messages) > 20:
-        out.insert(1, f'<div class="muted small">Showing latest 20 of {len(messages)} messages.</div>')
     out.append('</div>')
     return ''.join(out)
 
@@ -8048,9 +8092,12 @@ async def notify_admins_dispute_reply(row: sqlite3.Row, reply_text: str) -> None
     ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
     qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""
     text = f"💬 New dispute reply #{ref}{qr_line}\nFrom: {row['chat_id']}\n\n{reply_text}"
+    markup = None
+    if WEBHOOK_URL:
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("⚠️ Open disputes", url=f"{WEBHOOK_URL}/admin/disputes?status=attention")]])
     for admin_id in sorted(ADMIN_IDS):
         try:
-            await telegram_application.bot.send_message(chat_id=admin_id, text=text, protect_content=PROTECT_CONTENT)
+            await telegram_application.bot.send_message(chat_id=admin_id, text=text, reply_markup=markup, protect_content=PROTECT_CONTENT)
         except TelegramError:
             pass
 
@@ -9818,6 +9865,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           <h2 id="generic-confirm-title">Confirm action?</h2>
           <p id="generic-confirm-desc" class="confirm-modal-desc">Please confirm this action.</p>
           <form id="generic-confirm-submit-form" method="post" action="">
+            <div id="generic-confirm-fields"></div>
             <div class="confirm-actions">
               <button type="button" class="secondary" data-close-generic-confirm>Cancel</button>
               <button type="submit" id="generic-confirm-submit" class="danger">Confirm</button>
@@ -10087,9 +10135,27 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
       const genericTitle = document.getElementById('generic-confirm-title');
       const genericDesc = document.getElementById('generic-confirm-desc');
       const genericButton = document.getElementById('generic-confirm-submit');
+      const genericFields = document.getElementById('generic-confirm-fields');
+      function clearGenericConfirmFields() {{
+        if (genericFields) genericFields.innerHTML = '';
+      }}
+      function copyFormFieldsToGenericConfirm(form) {{
+        clearGenericConfirmFields();
+        if (!genericFields || !form) return;
+        const data = new FormData(form);
+        data.forEach(function(value, key) {{
+          if (typeof File !== 'undefined' && value instanceof File) return;
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = key;
+          input.value = value;
+          genericFields.appendChild(input);
+        }});
+      }}
       function closeGenericConfirm() {{
         if (genericShell) genericShell.hidden = true;
         if (genericForm) genericForm.action = '';
+        clearGenericConfirmFields();
       }}
       document.querySelectorAll('[data-close-generic-confirm]').forEach(function(el) {{
         el.addEventListener('click', closeGenericConfirm);
@@ -10100,6 +10166,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           event.preventDefault();
           genericForm.action = form.action;
           genericForm.method = form.method || 'post';
+          copyFormFieldsToGenericConfirm(form);
           if (genericTitle) genericTitle.textContent = form.getAttribute('data-confirm-title') || 'Confirm action?';
           if (genericDesc) genericDesc.textContent = form.getAttribute('data-confirm-message') || 'Please confirm this action.';
           if (genericButton) {{
@@ -10220,7 +10287,17 @@ async def admin_qr_status_override(request: Request, public_id: str):
     if guard:
         return guard
     form = await request.form()
-    new_status = str(form.get("status", "")).strip().lower()
+    # Prefer the canonical select field, but accept alternate button/JS field names too.
+    submitted_status = (
+        form.get("status")
+        or form.get("new_status")
+        or form.get("target_status")
+        or form.get("order_status")
+        or form.get("action")
+        or form.get("submit")
+        or ""
+    )
+    new_status = normalize_admin_order_status(submitted_status)
     failure_reason = str(form.get("failure_reason", "")).strip() or None
     ok, msg, result = admin_override_photo_status(public_id, new_status, failure_reason=failure_reason, status_by=0)
     if ok and result is not None and telegram_application is not None:
@@ -11556,12 +11633,38 @@ async def admin_disputes(request: Request):
     where = ""
     params: tuple = ()
     if status_filter == "attention":
-        where = "WHERE status IN ('open','under_review')"
+        where = "WHERE d.status IN ('open','under_review')"
     elif status_filter != "all":
-        where = "WHERE status = ?"
+        where = "WHERE d.status = ?"
         params = (status_filter,)
     with get_conn() as conn:
-        rows = conn.execute(f"SELECT * FROM disputes {where} ORDER BY created_at DESC LIMIT 500", params).fetchall()
+        rows = conn.execute(
+            f"""
+            SELECT
+                d.*,
+                COUNT(m.id) AS message_count,
+                COALESCE(SUM(CASE
+                    WHEN m.sender_type = 'user' AND m.id > COALESCE(d.admin_seen_message_id, 0) THEN 1
+                    ELSE 0
+                END), 0) AS admin_unread_count,
+                COALESCE(MAX(m.id), 0) AS latest_message_id,
+                MAX(m.created_at) AS latest_message_at,
+                (
+                    SELECT m2.sender_type
+                    FROM dispute_messages m2
+                    WHERE m2.dispute_id = d.id
+                    ORDER BY m2.id DESC
+                    LIMIT 1
+                ) AS latest_sender_type
+            FROM disputes d
+            LEFT JOIN dispute_messages m ON m.dispute_id = d.id
+            {where}
+            GROUP BY d.id
+            ORDER BY d.created_at DESC
+            LIMIT 500
+            """,
+            params,
+        ).fetchall()
         counts = {r["status"]: int(r["n"] or 0) for r in conn.execute("SELECT status, COUNT(*) AS n FROM disputes GROUP BY status").fetchall()}
     paged, pager = paginate_items(rows, request)
     def tab(label: str, value: str, count: int | None = None) -> str:
@@ -11581,93 +11684,160 @@ async def admin_disputes(request: Request):
     if not rows:
         body += '<p>No disputes in this view.</p>'
     else:
-        body += '<style>.dispute-chat-log{display:flex;flex-direction:column;gap:8px;min-width:280px;max-width:520px}.dispute-chat-bubble{padding:9px 11px;border-radius:12px;border:1px solid rgba(148,163,184,.25);background:rgba(15,23,42,.35)}.dispute-chat-bubble.admin{background:rgba(37,99,235,.16);border-color:rgba(96,165,250,.35)}.dispute-chat-bubble.user{background:rgba(22,163,74,.12);border-color:rgba(74,222,128,.28)}.dispute-chat-bubble div{white-space:pre-wrap;margin-top:4px}.small{font-size:12px}.dispute-actions{display:flex;gap:6px;flex-wrap:wrap}</style>'
-        body += '<div class="table-wrap"><table><tr><th>ID</th><th>QR</th><th>User</th><th>Chat</th><th>Status</th><th>Created</th><th>Action</th></tr>'
+        body += '''<style>
+        .dispute-chat-log{display:flex;flex-direction:column;gap:8px;min-width:0;max-width:none}
+        .dispute-chat-bubble{padding:9px 11px;border-radius:12px;border:1px solid rgba(148,163,184,.25);background:rgba(15,23,42,.35)}
+        .dispute-chat-bubble.admin{background:rgba(37,99,235,.16);border-color:rgba(96,165,250,.35)}
+        .dispute-chat-bubble.user{background:rgba(22,163,74,.12);border-color:rgba(74,222,128,.28)}
+        .dispute-chat-bubble div{white-space:pre-wrap;margin-top:4px;overflow-wrap:anywhere}
+        .small{font-size:12px}.dispute-actions{display:flex;gap:6px;flex-wrap:wrap}
+        .dispute-chat-cell{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;min-width:190px}
+        .dispute-chat-meta{flex:0 0 100%;margin-top:2px}.dispute-unread-badge{vertical-align:middle}
+        .dispute-chat-panel{width:min(820px,calc(100vw - 44px));max-height:calc(100vh - 44px);overflow:auto}
+        .dispute-chat-popup-log{max-height:46vh;overflow:auto;background:#0b1220;border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:16px}
+        .dispute-chat-readonly-note{background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.25);border-radius:12px;padding:10px 12px;margin-top:10px;color:var(--muted)}
+        </style>'''
+        body += '<div class="table-wrap"><table><tr><th>ID</th><th>QR</th><th>User</th><th>Replies</th><th>Status</th><th>Created</th><th>Action</th></tr>'
         for r in paged:
             user = get_admin_user_row(int(r['chat_id']))
             qr_public_id = str(r['public_id'] or '')
             qr = qr_id_link(qr_public_id) if qr_public_id else '<span class="muted">General</span>'
             ref = str(r['ref_id'] or f"DSP{int(r['id']):06d}")
             status = str(r['status'] or 'open').lower()
+            active_status = status in {'open', 'under_review'}
+            dispute_id = int(r['id'])
+            user_label = strip_tags(user_link(user)) if user else str(r['chat_id'])
+            chat_html_attr = esc(dispute_chat_html(dispute_id, limit=100))
+            unread_count = int(r['admin_unread_count'] or 0)
+            message_count = int(r['message_count'] or 0)
+            latest_sender = 'Admin' if str(r['latest_sender_type'] or '') == 'admin' else ('User' if r['latest_sender_type'] else '—')
+            latest_at = display_datetime(r['latest_message_at']) if r['latest_message_at'] else display_datetime(r['created_at'])
+            unread_badge = f'<span class="badge bad dispute-unread-badge">{unread_count} new</span>' if active_status and unread_count else ''
+            chat_action = f'/admin/disputes/{dispute_id}/message' if active_status else ''
+            chat_button_label = '💬 Reply' if active_status else '💬 View chat'
+            qr_label = qr_public_id or "General"
+            chat_cell = (
+                f'<div class="dispute-chat-cell">'
+                f'<button type="button" class="secondary dispute-chat-open" '
+                f'data-dispute-id="{dispute_id}" data-action="{esc(chat_action)}" data-seen-action="/admin/disputes/{dispute_id}/seen" '
+                f'data-mode="message" data-ref="{esc(ref)}" data-user="{esc(user_label)}" data-qr="{esc(qr_label)}" '
+                f'data-status="{esc(status)}" data-chat-html="{chat_html_attr}">{chat_button_label}</button>'
+                f'{unread_badge}'
+                f'<div class="muted small dispute-chat-meta">{message_count} message{"s" if message_count != 1 else ""} · Last: {esc(latest_sender)} · {esc(latest_at)}</div>'
+                f'</div>'
+            )
             action_parts: list[str] = []
             if status == 'open':
                 action_parts.append(
-                    f'<form class="inline" method="post" action="/admin/disputes/{esc(r["id"])}/review" '
+                    f'<form class="inline" method="post" action="/admin/disputes/{dispute_id}/review" '
                     'data-confirm-title="Mark under review?" data-confirm-button="Mark under review" data-confirm-class="secondary" '
                     'data-confirm-message="The user will be notified that the dispute is under review.">'
                     '<button class="secondary" type="submit">Under review</button></form>'
                 )
-            if status in {'open', 'under_review'}:
+            if active_status:
                 action_parts.append(
-                    f'<form class="inline dispute-message-form" method="post" action="/admin/disputes/{esc(r["id"])}/message" '
-                    f'data-mode="message" data-ref="{esc(ref)}" data-user="{esc(strip_tags(user_link(user)) if user else r["chat_id"])}" '
-                    f'data-qr="{esc(qr_public_id or "General")}"><button class="secondary" type="submit">💬 Message</button></form>'
+                    f'<form class="inline dispute-chat-form" method="post" action="/admin/disputes/{dispute_id}/resolve" '
+                    f'data-mode="resolve" data-ref="{esc(ref)}" data-user="{esc(user_label)}" data-qr="{esc(qr_label)}" '
+                    f'data-dispute-id="{dispute_id}" data-seen-action="/admin/disputes/{dispute_id}/seen" data-chat-html="{chat_html_attr}">'
+                    '<button class="success" type="submit">Resolve</button></form>'
                 )
                 action_parts.append(
-                    f'<form class="inline dispute-message-form" method="post" action="/admin/disputes/{esc(r["id"])}/resolve" '
-                    f'data-mode="resolve" data-ref="{esc(ref)}" data-user="{esc(strip_tags(user_link(user)) if user else r["chat_id"])}" '
-                    f'data-qr="{esc(qr_public_id or "General")}"><button class="success" type="submit">Resolve</button></form>'
-                )
-                action_parts.append(
-                    f'<form class="inline dispute-message-form" method="post" action="/admin/disputes/{esc(r["id"])}/reject" '
-                    f'data-mode="reject" data-ref="{esc(ref)}" data-user="{esc(strip_tags(user_link(user)) if user else r["chat_id"])}" '
-                    f'data-qr="{esc(qr_public_id or "General")}"><button class="danger" type="submit">Reject</button></form>'
+                    f'<form class="inline dispute-chat-form" method="post" action="/admin/disputes/{dispute_id}/reject" '
+                    f'data-mode="reject" data-ref="{esc(ref)}" data-user="{esc(user_label)}" data-qr="{esc(qr_label)}" '
+                    f'data-dispute-id="{dispute_id}" data-seen-action="/admin/disputes/{dispute_id}/seen" data-chat-html="{chat_html_attr}">'
+                    '<button class="danger" type="submit">Reject</button></form>'
                 )
             action = '<div class="dispute-actions">' + ' '.join(action_parts) + '</div>' if action_parts else '<span class="muted">No action</span>'
-            chat_html = dispute_chat_html(int(r['id']))
             body += (
                 f'<tr><td>#{esc(ref)}</td><td>{qr}</td><td>{user_link(user) if user else esc(r["chat_id"])}</td>'
-                f'<td>{chat_html}</td><td>{dispute_status_pill(status)}</td><td>{esc(display_datetime(r["created_at"]))}</td><td>{action}</td></tr>'
+                f'<td>{chat_cell}</td><td>{dispute_status_pill(status)}</td><td>{esc(display_datetime(r["created_at"]))}</td><td>{action}</td></tr>'
             )
         body += '</table></div>' + pager
     body += '</div>'
     body += """
-    <div id="dispute-message-modal" class="confirm-modal-shell" hidden>
-      <div class="confirm-modal-backdrop" data-close-dispute-message></div>
-      <div class="confirm-modal-panel" role="dialog" aria-modal="true" aria-labelledby="dispute-message-title">
-        <h2 id="dispute-message-title">Message dispute user</h2>
-        <p id="dispute-message-desc" class="confirm-modal-desc">Send a question or update before making the final decision.</p>
-        <form id="dispute-message-submit-form" method="post" action="">
-          <label>Message to disputer</label>
-          <textarea name="admin_note" required placeholder="Ask a question or send an update."></textarea>
+    <div id="dispute-chat-modal" class="confirm-modal-shell" hidden>
+      <div class="confirm-modal-backdrop" data-close-dispute-chat></div>
+      <div class="confirm-modal-panel dispute-chat-panel" role="dialog" aria-modal="true" aria-labelledby="dispute-chat-title">
+        <button class="modal-close" type="button" data-close-dispute-chat aria-label="Close dispute chat">×</button>
+        <h2 id="dispute-chat-title">Dispute chat</h2>
+        <p id="dispute-chat-desc" class="confirm-modal-desc">Previous replies are shown below.</p>
+        <div id="dispute-chat-content" class="dispute-chat-popup-log"></div>
+        <form id="dispute-chat-submit-form" method="post" action="">
+          <label id="dispute-chat-label">Reply to disputer</label>
+          <textarea name="admin_note" required placeholder="Type your reply."></textarea>
           <div class="confirm-actions">
-            <button type="button" class="secondary" data-close-dispute-message>Cancel</button>
-            <button type="submit" id="dispute-message-submit-button" class="success">Send</button>
+            <button type="button" class="secondary" data-close-dispute-chat>Cancel</button>
+            <button type="submit" id="dispute-chat-submit-button" class="success">Send Reply</button>
           </div>
         </form>
+        <div id="dispute-chat-readonly" class="dispute-chat-readonly-note" hidden>This dispute is closed, so the chat is read-only.</div>
       </div>
     </div>
     <script>
     document.addEventListener('DOMContentLoaded', function() {
-      const shell = document.getElementById('dispute-message-modal');
-      const submitForm = document.getElementById('dispute-message-submit-form');
-      const title = document.getElementById('dispute-message-title');
-      const desc = document.getElementById('dispute-message-desc');
-      const button = document.getElementById('dispute-message-submit-button');
-      if (!shell || !submitForm) return;
-      function closeModal() { shell.hidden = true; submitForm.action = ''; }
-      document.querySelectorAll('[data-close-dispute-message]').forEach(function(el) { el.addEventListener('click', closeModal); });
-      document.querySelectorAll('.dispute-message-form').forEach(function(form) {
+      const shell = document.getElementById('dispute-chat-modal');
+      const submitForm = document.getElementById('dispute-chat-submit-form');
+      const title = document.getElementById('dispute-chat-title');
+      const desc = document.getElementById('dispute-chat-desc');
+      const button = document.getElementById('dispute-chat-submit-button');
+      const label = document.getElementById('dispute-chat-label');
+      const chatContent = document.getElementById('dispute-chat-content');
+      const readonlyNote = document.getElementById('dispute-chat-readonly');
+      if (!shell || !submitForm || !chatContent) return;
+
+      function closeModal() {
+        shell.hidden = true;
+        submitForm.action = '';
+        chatContent.innerHTML = '';
+      }
+      function markSeen(source) {
+        const seenAction = source.getAttribute('data-seen-action') || '';
+        if (!seenAction) return;
+        fetch(seenAction, {method: 'POST', credentials: 'same-origin'}).catch(function() {});
+        const row = source.closest('tr');
+        if (row) {
+          row.querySelectorAll('.dispute-unread-badge').forEach(function(el) { el.remove(); });
+        }
+      }
+      function openModal(source, action, mode) {
+        const ref = source.getAttribute('data-ref') || '';
+        const user = source.getAttribute('data-user') || '';
+        const qr = source.getAttribute('data-qr') || '';
+        const status = source.getAttribute('data-status') || '';
+        const chatHtml = source.getAttribute('data-chat-html') || '<div class="muted">No previous replies.</div>';
+        const isReadOnly = !action;
+        chatContent.innerHTML = chatHtml;
+        submitForm.action = action || '';
+        submitForm.hidden = isReadOnly;
+        if (readonlyNote) readonlyNote.hidden = !isReadOnly;
+        if (title) title.textContent = mode === 'reject' ? 'Reject dispute?' : (mode === 'resolve' ? 'Resolve dispute?' : 'Dispute chat / reply');
+        if (desc) desc.textContent = 'Dispute #' + ref + ' · ' + user + ' · QR: ' + qr + (status ? ' · Status: ' + status.replace('_', ' ') : '');
+        if (button) {
+          button.textContent = mode === 'reject' ? 'Reject & Send' : (mode === 'resolve' ? 'Resolve & Send' : 'Send Reply');
+          button.className = mode === 'reject' ? 'danger' : (mode === 'resolve' ? 'success' : 'success');
+        }
+        if (label) label.textContent = mode === 'reject' ? 'Final rejection message' : (mode === 'resolve' ? 'Final resolved message' : 'Reply to disputer');
+        const textarea = submitForm.querySelector('textarea[name="admin_note"]');
+        if (textarea) {
+          textarea.value = '';
+          textarea.placeholder = mode === 'reject' ? 'Final rejection message.' : (mode === 'resolve' ? 'Final resolved message.' : 'Type your reply.');
+        }
+        shell.hidden = false;
+        chatContent.scrollTop = chatContent.scrollHeight;
+        if (textarea && !isReadOnly) textarea.focus();
+        markSeen(source);
+      }
+
+      document.querySelectorAll('[data-close-dispute-chat]').forEach(function(el) { el.addEventListener('click', closeModal); });
+      document.querySelectorAll('.dispute-chat-open').forEach(function(buttonEl) {
+        buttonEl.addEventListener('click', function() {
+          openModal(buttonEl, buttonEl.getAttribute('data-action') || '', buttonEl.getAttribute('data-mode') || 'message');
+        });
+      });
+      document.querySelectorAll('.dispute-chat-form').forEach(function(form) {
         form.addEventListener('submit', function(event) {
           event.preventDefault();
-          const mode = form.getAttribute('data-mode') || 'resolve';
-          const ref = form.getAttribute('data-ref') || '';
-          const user = form.getAttribute('data-user') || '';
-          const qr = form.getAttribute('data-qr') || '';
-          submitForm.action = form.action;
-          if (title) title.textContent = mode === 'reject' ? 'Reject dispute?' : (mode === 'resolve' ? 'Resolve dispute?' : 'Message disputer');
-          if (button) {
-            button.textContent = mode === 'reject' ? 'Reject & Send' : (mode === 'resolve' ? 'Resolve & Send' : 'Send Message');
-            button.className = mode === 'reject' ? 'danger' : (mode === 'resolve' ? 'success' : 'secondary');
-          }
-          if (desc) desc.textContent = 'Dispute #' + ref + ' · ' + user + ' · QR: ' + qr;
-          const textarea = submitForm.querySelector('textarea[name="admin_note"]');
-          if (textarea) {
-            textarea.value = '';
-            textarea.placeholder = mode === 'reject' ? 'Final rejection message.' : (mode === 'resolve' ? 'Final resolved message.' : 'Ask a question or send an update.');
-            textarea.focus();
-          }
-          shell.hidden = false;
+          openModal(form, form.action, form.getAttribute('data-mode') || 'message');
         });
       });
       document.addEventListener('keydown', function(event) { if (event.key === 'Escape' && !shell.hidden) closeModal(); });
@@ -11675,7 +11845,6 @@ async def admin_disputes(request: Request):
     </script>
     """
     return render_page("Disputes", body, request)
-
 
 async def _notify_dispute_user(row: sqlite3.Row, text: str, reply_button: bool = False) -> bool:
     if telegram_application is None:
@@ -11688,6 +11857,18 @@ async def _notify_dispute_user(row: sqlite3.Row, text: str, reply_button: bool =
         return True
     except TelegramError:
         return False
+
+
+@web_app.post("/admin/disputes/{dispute_id}/seen")
+async def admin_dispute_seen(request: Request, dispute_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    row = get_dispute_by_id(dispute_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Dispute not found")
+    mark_dispute_admin_seen(dispute_id)
+    return Response(status_code=204)
 
 
 @web_app.post("/admin/disputes/{dispute_id}/message")
@@ -11708,6 +11889,8 @@ async def admin_dispute_message(request: Request, dispute_id: int):
             (dispute_id, admin_note, now_iso()),
         )
         conn.execute("UPDATE disputes SET status = 'under_review', admin_note = ? WHERE id = ? AND status IN ('open','under_review')", (admin_note, dispute_id))
+        latest_id = conn.execute("SELECT COALESCE(MAX(id), 0) AS latest_id FROM dispute_messages WHERE dispute_id = ?", (dispute_id,)).fetchone()["latest_id"]
+        conn.execute("UPDATE disputes SET admin_seen_message_id = ? WHERE id = ?", (int(latest_id or 0), dispute_id))
         row = conn.execute("SELECT * FROM disputes WHERE id = ?", (dispute_id,)).fetchone()
     ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
     qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""
@@ -11749,6 +11932,8 @@ async def admin_dispute_resolve(request: Request, dispute_id: int):
                 "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, 'admin', NULL, ?, ?)",
                 (dispute_id, admin_note, now_iso()),
             )
+            latest_id = conn.execute("SELECT COALESCE(MAX(id), 0) AS latest_id FROM dispute_messages WHERE dispute_id = ?", (dispute_id,)).fetchone()["latest_id"]
+            conn.execute("UPDATE disputes SET admin_seen_message_id = ? WHERE id = ?", (int(latest_id or 0), dispute_id))
     if row and cur.rowcount:
         ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
         qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""
@@ -11775,6 +11960,8 @@ async def admin_dispute_reject(request: Request, dispute_id: int):
                 "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, 'admin', NULL, ?, ?)",
                 (dispute_id, admin_note, now_iso()),
             )
+            latest_id = conn.execute("SELECT COALESCE(MAX(id), 0) AS latest_id FROM dispute_messages WHERE dispute_id = ?", (dispute_id,)).fetchone()["latest_id"]
+            conn.execute("UPDATE disputes SET admin_seen_message_id = ? WHERE id = ?", (int(latest_id or 0), dispute_id))
     if row and cur.rowcount:
         ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
         qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""

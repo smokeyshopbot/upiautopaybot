@@ -70,7 +70,7 @@ Admin features:
 - Wallets: view sender balances and receiver due amounts, plus manual adjustments.
 - Payments: BEP20/Polygon wallet addresses, Binance Pay ID/name, manual TxHash tolerances, minimum wallet top-up, and deposit review.
 - Payout Requests: review receiver withdrawal requests with red sidebar count. Receiver withdrawals are blocked until available balance reaches the admin-set minimum payout amount.
-- Disputes: review `/dispute` submissions with clear statuses: Open, Under Review, Resolved, and Rejected. Resolve/reject actions ask for the message to send to the disputer.
+- Disputes: review `/dispute` submissions with clear statuses: Open, Under Review, Resolved, and Rejected. The dispute list now stays compact with a Reply/View Chat button, new-reply badges, popup chat history, and admin replies/resolution messages from the popup.
 - Pending QR: view open/claimed QR offers and statuses. Clicking a QR ID opens its admin detail page with QR image, users, rates, timestamps, linked disputes, and admin status override.
 - QR status override: admin can change any order to Done or Failed; both sender and receiver are notified, receiver earnings are deducted when a completed order is reversed, and the sender charge is added back/released automatically.
 - Stats: marketplace statistics.
