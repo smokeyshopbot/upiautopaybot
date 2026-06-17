@@ -74,7 +74,7 @@ Admin features:
 - Pending QR: view open/claimed QR offers and statuses. Clicking a QR ID opens its admin detail page with QR image, users, rates, timestamps, linked disputes, and admin status override.
 - QR status override: admin can change any order to Done or Failed; both sender and receiver are notified, receiver earnings are deducted when a completed order is reversed, and the sender charge is added back/released automatically.
 - Stats: marketplace statistics.
-- Broadcast: send web-panel broadcasts to users.
+- Broadcast: send web-panel broadcasts to users by language and target group, including a dedicated Admins target.
 - Secret Settings: web login credentials, payment verification API keys/secrets, QR expire time, bot timing, and receiver withdrawal minimum payout.
 
 ## Maintenance mode
@@ -248,4 +248,14 @@ The admin Preset Messages page includes a **Broadcast by language** box. Choose 
 
 ### Admin Broadcast Panel
 
-The admin sidebar includes a dedicated **📣 Broadcast** panel. Use it to send an admin-written message to all active users or only senders/receivers, filtered by selected bot language: English, Indonesian, Vietnamese, Chinese, or Spanish. Users without a saved language are treated as English. Broadcast text is sent exactly as typed and is not auto-translated.
+The admin sidebar includes a dedicated **📣 Broadcast** panel. Use it to send an admin-written message to all active users, senders, receivers, or admins, filtered by selected bot language: English, Indonesian, Vietnamese, Chinese, or Spanish. Users without a saved language are treated as English. Broadcast text is sent exactly as typed and is not auto-translated. Configured `ADMIN_IDS` are not excluded from broadcasts or marketplace delivery; sender/receiver broadcast targets include matching users plus configured admin IDs, and the Admins target sends only to configured admin IDs that have started the bot.
+
+
+## Admin Telegram IDs in bot commands
+
+Configured `ADMIN_IDS` are treated as virtual admins in the Telegram bot. They can use sender-side and receiver-side commands without being blocked by sender/receiver role checks. Admin IDs are not excluded from broadcasts, marketplace preset messages, receiver online notifications, or QR offers. To receive QR offers, an admin still needs to use `/on LIMIT`, the same as a receiver, so the marketplace capacity stays controlled.
+
+
+### Sender cancel button
+
+Senders now see a cancel button under each open QR offer. The button can cancel the order only after 2 minutes if no receiver has accepted it yet. Canceling releases the sender reserved balance and removes receiver accept buttons for that offer.

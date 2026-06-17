@@ -168,6 +168,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Open marketplace settings. The web panel can override most of these in Secret Settings / Payments.
 QR_EXPIRE_MINUTES = int(os.getenv("QR_EXPIRE_MINUTES", "5"))
+SENDER_CANCEL_WAIT_SECONDS = int(os.getenv("SENDER_CANCEL_WAIT_SECONDS", "120"))
 MARKETPLACE_WATCH_INTERVAL_SECONDS = int(os.getenv("MARKETPLACE_WATCH_INTERVAL_SECONDS", "10"))
 PAYMENT_WATCH_INTERVAL_SECONDS = int(os.getenv("PAYMENT_WATCH_INTERVAL_SECONDS", "30"))
 PAYMENT_TIMEOUT_MINUTES = int(os.getenv("PAYMENT_TIMEOUT_MINUTES", "30"))
@@ -701,6 +702,85 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
 for _code, _meta in SUPPORTED_LANGUAGES.items():
     _TRANSLATIONS.setdefault(_code, {})
     for _k, _v in _TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
+_CANCEL_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "btn_cancel_open_order": "❌ Cancel Order",
+        "cancel_order_wait": "This order can be canceled only after 2 minutes from submission, and only if no receiver has accepted it. Please try again in about {seconds} seconds.",
+        "cancel_order_sender_only": "Only the QR sender can cancel this order.",
+        "cancel_order_not_found": "QR order not found.",
+        "cancel_order_already_accepted": "This order has already been accepted by a receiver, so it cannot be canceled.",
+        "cancel_order_already_processed": "This QR is already marked {status}.",
+        "cancel_order_expired": "This QR has already expired.",
+        "cancel_order_done": "Order canceled. Reserved balance has been released.",
+        "cancel_order_failed": "Could not cancel this order right now.",
+        "cancel_order_status_line": "🚫 Order canceled by sender. Reserved balance has been released.",
+        "offer_canceled_receiver_text": "🚫 Offer canceled by sender.\n🆔 Offer ID: {public_id}\nThis QR can no longer be accepted.",
+        "claim_offer_canceled": "Offer canceled by sender.",
+    },
+    "id": {
+        "btn_cancel_open_order": "❌ Batalkan Pesanan",
+        "cancel_order_wait": "Pesanan ini hanya dapat dibatalkan setelah 2 menit sejak dikirim, dan hanya jika belum ada penerima yang menerimanya. Silakan coba lagi sekitar {seconds} detik.",
+        "cancel_order_sender_only": "Hanya pengirim QR yang dapat membatalkan pesanan ini.",
+        "cancel_order_not_found": "Pesanan QR tidak ditemukan.",
+        "cancel_order_already_accepted": "Pesanan ini sudah diterima oleh penerima, jadi tidak dapat dibatalkan.",
+        "cancel_order_already_processed": "QR ini sudah ditandai {status}.",
+        "cancel_order_expired": "QR ini sudah kedaluwarsa.",
+        "cancel_order_done": "Pesanan dibatalkan. Saldo yang direservasi telah dilepaskan.",
+        "cancel_order_failed": "Tidak dapat membatalkan pesanan ini sekarang.",
+        "cancel_order_status_line": "🚫 Pesanan dibatalkan oleh pengirim. Saldo yang direservasi telah dilepaskan.",
+        "offer_canceled_receiver_text": "🚫 Penawaran dibatalkan oleh pengirim.\n🆔 ID Penawaran: {public_id}\nQR ini tidak dapat diterima lagi.",
+        "claim_offer_canceled": "Penawaran dibatalkan oleh pengirim.",
+    },
+    "vi": {
+        "btn_cancel_open_order": "❌ Hủy đơn",
+        "cancel_order_wait": "Đơn này chỉ có thể được hủy sau 2 phút kể từ khi gửi, và chỉ khi chưa có người nhận nào chấp nhận. Vui lòng thử lại sau khoảng {seconds} giây.",
+        "cancel_order_sender_only": "Chỉ người gửi QR mới có thể hủy đơn này.",
+        "cancel_order_not_found": "Không tìm thấy đơn QR.",
+        "cancel_order_already_accepted": "Đơn này đã được người nhận chấp nhận nên không thể hủy.",
+        "cancel_order_already_processed": "QR này đã được đánh dấu {status}.",
+        "cancel_order_expired": "QR này đã hết hạn.",
+        "cancel_order_done": "Đã hủy đơn. Số dư đã giữ đã được giải phóng.",
+        "cancel_order_failed": "Hiện không thể hủy đơn này.",
+        "cancel_order_status_line": "🚫 Đơn đã được người gửi hủy. Số dư đã giữ đã được giải phóng.",
+        "offer_canceled_receiver_text": "🚫 Ưu đãi đã bị người gửi hủy.\n🆔 ID ưu đãi: {public_id}\nQR này không thể được nhận nữa.",
+        "claim_offer_canceled": "Ưu đãi đã bị người gửi hủy.",
+    },
+    "zh": {
+        "btn_cancel_open_order": "❌ 取消订单",
+        "cancel_order_wait": "此订单只能在提交 2 分钟后取消，并且前提是尚未被接收方接受。请约 {seconds} 秒后重试。",
+        "cancel_order_sender_only": "只有 QR 发送方可以取消此订单。",
+        "cancel_order_not_found": "未找到 QR 订单。",
+        "cancel_order_already_accepted": "此订单已被接收方接受，因此不能取消。",
+        "cancel_order_already_processed": "此 QR 已标记为 {status}。",
+        "cancel_order_expired": "此 QR 已过期。",
+        "cancel_order_done": "订单已取消。预留余额已释放。",
+        "cancel_order_failed": "现在无法取消此订单。",
+        "cancel_order_status_line": "🚫 订单已由发送方取消。预留余额已释放。",
+        "offer_canceled_receiver_text": "🚫 报价已由发送方取消。\n🆔 报价 ID：{public_id}\n此 QR 不能再被接受。",
+        "claim_offer_canceled": "报价已由发送方取消。",
+    },
+    "es": {
+        "btn_cancel_open_order": "❌ Cancelar pedido",
+        "cancel_order_wait": "Este pedido solo se puede cancelar 2 minutos después de enviarlo, y solo si ningún receptor lo ha aceptado. Inténtalo de nuevo en unos {seconds} segundos.",
+        "cancel_order_sender_only": "Solo el remitente del QR puede cancelar este pedido.",
+        "cancel_order_not_found": "Pedido QR no encontrado.",
+        "cancel_order_already_accepted": "Este pedido ya fue aceptado por un receptor, por lo que no se puede cancelar.",
+        "cancel_order_already_processed": "Este QR ya está marcado como {status}.",
+        "cancel_order_expired": "Este QR ya venció.",
+        "cancel_order_done": "Pedido cancelado. El saldo reservado se ha liberado.",
+        "cancel_order_failed": "No se pudo cancelar este pedido ahora mismo.",
+        "cancel_order_status_line": "🚫 Pedido cancelado por el remitente. El saldo reservado se ha liberado.",
+        "offer_canceled_receiver_text": "🚫 Oferta cancelada por el remitente.\n🆔 ID de oferta: {public_id}\nEste QR ya no se puede aceptar.",
+        "claim_offer_canceled": "Oferta cancelada por el remitente.",
+    },
+}
+for _code, _items in _CANCEL_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _CANCEL_TRANSLATIONS["en"].items():
         _TRANSLATIONS[_code].setdefault(_k, _v)
 
 
@@ -1367,6 +1447,69 @@ def now_iso() -> str:
     return now_dt().isoformat(timespec="seconds")
 
 
+def parse_bot_datetime(value: str | datetime | None) -> datetime | None:
+    """Parse bot/database timestamps safely in BOT_TZ.
+
+    SQLite stores timestamps as ISO strings.  Comparing those strings directly can
+    be wrong if an offset or timezone format changes, so all QR expiry checks go
+    through this parser and compare real datetimes instead.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            dt = datetime.fromisoformat(text)
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=ZoneInfo(BOT_TZ))
+    return dt.astimezone(ZoneInfo(BOT_TZ))
+
+
+def iso_is_due(value: str | datetime | None, now_value: datetime | None = None) -> bool:
+    dt = parse_bot_datetime(value)
+    if dt is None:
+        return False
+    return dt <= (now_value or now_dt())
+
+
+def seconds_until_iso(value: str | datetime | None) -> int:
+    dt = parse_bot_datetime(value)
+    if dt is None:
+        return 0
+    return max(0, int(dt.timestamp() - now_dt().timestamp()))
+
+
+def seconds_since_iso(value: str | datetime | None) -> int:
+    dt = parse_bot_datetime(value)
+    if dt is None:
+        return 0
+    return max(0, int(now_dt().timestamp() - dt.timestamp()))
+
+
+def qr_expiry_status_at(row: sqlite3.Row | None) -> str:
+    """Return the timestamp that should be used when a QR expires.
+
+    Even if the background watcher processes an expired QR late, the admin panel
+    should show the configured expiry time, not the delayed processing time.
+    """
+    if row is not None:
+        try:
+            expires_at = str(row["offer_expires_at"] or "").strip()
+            if expires_at:
+                return expires_at
+        except Exception:
+            pass
+    return now_iso()
+
+
 def today_str() -> str:
     return now_dt().date().isoformat()
 
@@ -1432,6 +1575,55 @@ def is_admin(chat_id: int | None) -> bool:
 
 def require_admin(update: Update) -> bool:
     return is_admin(update.effective_chat.id if update.effective_chat else None)
+
+
+def _admin_id_clause(column: str = "u.chat_id") -> tuple[str, list[int]]:
+    """Return a SQL clause/params for configured Telegram admin IDs.
+
+    Admins are a virtual permission layer. They are not removed from user-facing
+    recipient lists; this helper lets role-based lists include them when needed.
+    """
+    ids = sorted(int(x) for x in ADMIN_IDS)
+    if not ids:
+        return "0", []
+    return f"{column} IN ({','.join(['?'] * len(ids))})", ids
+
+
+def get_user_for_chat(chat_id: int | None) -> UserRow | None:
+    if chat_id is None:
+        return None
+    user = get_user(chat_id)
+    if user:
+        return user
+    if is_admin(chat_id):
+        return ensure_default_sender_user(chat_id)
+    return None
+
+
+def is_active_user_or_admin(chat_id: int | None, user: UserRow | None = None) -> bool:
+    if chat_id is not None and is_admin(chat_id):
+        return True
+    return bool(user and user.active)
+
+
+def can_use_sender_features(chat_id: int | None, user: UserRow | None = None) -> bool:
+    if chat_id is not None and is_admin(chat_id):
+        return True
+    return bool(user and user.active and user.role == "sender")
+
+
+def can_use_receiver_features(chat_id: int | None, user: UserRow | None = None) -> bool:
+    if chat_id is not None and is_admin(chat_id):
+        return True
+    return bool(user and user.active and user.role == "receiver")
+
+
+def effective_role_label(chat_id: int | None, user: UserRow | None = None) -> str:
+    if chat_id is not None and is_admin(chat_id):
+        return "admin"
+    if user and user.active:
+        return user.role
+    return "unregistered"
 
 
 def upsert_user(chat_id: int, role: str, alias: str | None = None) -> None:
@@ -2581,53 +2773,59 @@ def manual_adjust_wallet(chat_id: int, amount: Decimal, target: str, note: str) 
 
 
 def online_receivers(limit: int = 500) -> list[sqlite3.Row]:
+    admin_clause, admin_params = _admin_id_clause("u.chat_id")
+    role_clause = f"(u.role = 'receiver' OR {admin_clause})"
     with get_conn() as conn:
         return conn.execute(
-            """
+            f"""
             SELECT r.*, u.alias, u.active, p.username, p.first_name, p.last_name
             FROM receiver_presence r
             JOIN users u ON u.chat_id = r.chat_id
             LEFT JOIN telegram_profiles p ON p.chat_id = r.chat_id
-            WHERE r.online = 1 AND r.limit_remaining > 0 AND u.role = 'receiver' AND u.active = 1
+            WHERE r.online = 1 AND r.limit_remaining > 0 AND {role_clause} AND u.active = 1
             ORDER BY r.updated_at ASC
             LIMIT ?
             """,
-            (limit,),
+            [*admin_params, limit],
         ).fetchall()
 
 
 def active_receivers(limit: int = 1000) -> list[sqlite3.Row]:
-    """All active receivers for marketplace preset-message broadcasts.
+    """All active receiver-side recipients for marketplace preset-message broadcasts.
 
-    QR offers still use online_receivers(); preset messages use every active receiver
-    because they are marketplace announcements/questions, not claimable scan tasks.
+    Admin IDs are included as virtual admins, not excluded from user-facing delivery.
+    QR offers still require /on LIMIT and use online_receivers().
     """
+    admin_clause, admin_params = _admin_id_clause("u.chat_id")
+    role_clause = f"(u.role = 'receiver' OR {admin_clause})"
     with get_conn() as conn:
         return conn.execute(
-            """
+            f"""
             SELECT u.*, p.username, p.first_name, p.last_name
             FROM users u
             LEFT JOIN telegram_profiles p ON p.chat_id = u.chat_id
-            WHERE u.role = 'receiver' AND u.active = 1 AND u.chat_id != 0
+            WHERE {role_clause} AND u.active = 1 AND u.chat_id != 0
             ORDER BY u.updated_at DESC
             LIMIT ?
             """,
-            (limit,),
+            [*admin_params, limit],
         ).fetchall()
 
 
 def active_senders(limit: int = 1000) -> list[sqlite3.Row]:
+    admin_clause, admin_params = _admin_id_clause("u.chat_id")
+    role_clause = f"(u.role = 'sender' OR {admin_clause})"
     with get_conn() as conn:
         return conn.execute(
-            """
+            f"""
             SELECT u.*, p.username, p.first_name, p.last_name
             FROM users u
             LEFT JOIN telegram_profiles p ON p.chat_id = u.chat_id
-            WHERE u.role = 'sender' AND u.active = 1 AND u.chat_id != 0
+            WHERE {role_clause} AND u.active = 1 AND u.chat_id != 0
             ORDER BY u.updated_at DESC
             LIMIT ?
             """,
-            (limit,),
+            [*admin_params, limit],
         ).fetchall()
 
 
@@ -2636,13 +2834,19 @@ def users_for_language_broadcast(language: str = "all", role: str = "all", limit
     if language != "all":
         language = normalize_language_code(language)
     role = str(role or "all").strip().lower()
-    if role not in {"all", "sender", "receiver"}:
+    if role not in {"all", "sender", "receiver", "admin"}:
         role = "all"
     clauses = ["u.active = 1", "u.chat_id != 0"]
     params: list[Any] = []
-    if role != "all":
-        clauses.append("u.role = ?")
+    if role == "admin":
+        admin_clause, admin_params = _admin_id_clause("u.chat_id")
+        clauses.append(admin_clause)
+        params.extend(admin_params)
+    elif role != "all":
+        admin_clause, admin_params = _admin_id_clause("u.chat_id")
+        clauses.append(f"(u.role = ? OR {admin_clause})")
         params.append(role)
+        params.extend(admin_params)
     if language != "all":
         clauses.append("COALESCE(ul.language, ?) = ?")
         params.extend([DEFAULT_LANGUAGE, language])
@@ -2786,31 +2990,36 @@ def save_open_offer(
         )
 
 
-def list_open_offers_to_expire(now_value: str | None = None, limit: int = 100) -> list[sqlite3.Row]:
+def list_open_offers_to_expire(now_value: str | datetime | None = None, limit: int = 100) -> list[sqlite3.Row]:
+    due_now = parse_bot_datetime(now_value) if now_value is not None else now_dt()
+    fetch_limit = max(int(limit or 100) * 5, int(limit or 100), 100)
     with get_conn() as conn:
-        return conn.execute(
+        rows = conn.execute(
             """
             SELECT * FROM photos
-            WHERE offer_state = 'open' AND offer_expires_at IS NOT NULL AND offer_expires_at <= ?
+            WHERE offer_state = 'open' AND offer_expires_at IS NOT NULL
             ORDER BY offer_expires_at ASC LIMIT ?
             """,
-            (now_value or now_iso(), limit),
+            (fetch_limit,),
         ).fetchall()
+    return [row for row in rows if iso_is_due(row["offer_expires_at"], due_now)][: max(1, int(limit or 100))]
 
 
-def list_pending_qrs_to_expire(now_value: str | None = None, limit: int = 100) -> list[sqlite3.Row]:
+def list_pending_qrs_to_expire(now_value: str | datetime | None = None, limit: int = 100) -> list[sqlite3.Row]:
+    due_now = parse_bot_datetime(now_value) if now_value is not None else now_dt()
+    fetch_limit = max(int(limit or 100) * 5, int(limit or 100), 100)
     with get_conn() as conn:
-        return conn.execute(
+        rows = conn.execute(
             """
             SELECT * FROM photos
             WHERE status = 'pending'
               AND offer_state IN ('open', 'claimed')
               AND offer_expires_at IS NOT NULL
-              AND offer_expires_at <= ?
             ORDER BY offer_expires_at ASC LIMIT ?
             """,
-            (now_value or now_iso(), limit),
+            (fetch_limit,),
         ).fetchall()
+    return [row for row in rows if iso_is_due(row["offer_expires_at"], due_now)][: max(1, int(limit or 100))]
 
 
 def expire_offer_in_db(public_id: str, reason: str = "expired") -> sqlite3.Row | None:
@@ -2820,9 +3029,15 @@ def expire_offer_in_db(public_id: str, reason: str = "expired") -> sqlite3.Row |
         if not row or row["offer_state"] != "open":
             conn.rollback()
             return None
+        now = now_iso()
         conn.execute(
-            "UPDATE photos SET offer_state = ?, status_at = ? WHERE public_id = ? AND offer_state = 'open'",
-            (reason, now_iso(), public_id),
+            """
+            UPDATE photos
+            SET offer_state = ?, status = 'failed', status_at = ?, settled_at = ?, charged_usdt = 0, earned_usdt = 0,
+                failure_reason = COALESCE(NULLIF(failure_reason, ''), 'No receiver could be notified')
+            WHERE public_id = ? AND offer_state = 'open'
+            """,
+            (reason, now, now, public_id),
         )
         conn.commit()
         return row
@@ -2856,9 +3071,12 @@ def claim_offer_in_db(public_id: str, receiver_chat_id: int) -> tuple[bool, str,
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
         actor = conn.execute("SELECT * FROM users WHERE chat_id = ?", (receiver_chat_id,)).fetchone()
-        if not actor or actor["role"] != "receiver" or not actor["active"]:
+        if not is_admin(receiver_chat_id) and (not actor or actor["role"] != "receiver" or not actor["active"]):
             conn.rollback()
             return False, "Only active receivers can accept offers.", None, False
+        if is_admin(receiver_chat_id) and (not actor or not actor["active"]):
+            conn.rollback()
+            return False, "Admin account is not active in the bot. Send /start first.", None, False
         presence = conn.execute("SELECT * FROM receiver_presence WHERE chat_id = ?", (receiver_chat_id,)).fetchone()
         if not presence or not presence["online"] or int(presence["limit_remaining"] or 0) <= 0:
             conn.rollback()
@@ -2867,12 +3085,14 @@ def claim_offer_in_db(public_id: str, receiver_chat_id: int) -> tuple[bool, str,
         if not row:
             conn.rollback()
             return False, "Offer not found.", None, False
+        if str(row["offer_state"] or "").lower() == "canceled":
+            conn.rollback()
+            return False, "claim_offer_canceled", row, False
         if row["offer_state"] != "open" or int(row["receiver_chat_id"] or 0) != 0:
             conn.rollback()
             return False, "Offer expired. Another receiver already accepted this QR.", row, False
-        if row["offer_expires_at"] and row["offer_expires_at"] <= now_iso():
-            conn.execute("UPDATE photos SET offer_state = 'expired', status_at = ? WHERE public_id = ?", (now_iso(), public_id))
-            conn.commit()
+        if iso_is_due(row["offer_expires_at"]):
+            conn.rollback()
             return False, "Offer expired.", row, False
         remaining_before = int(presence["limit_remaining"] or 0)
         remaining_after = max(0, remaining_before - 1)
@@ -2900,6 +3120,74 @@ def claim_offer_in_db(public_id: str, receiver_chat_id: int) -> tuple[bool, str,
 def set_receiver_message_for_offer(public_id: str, receiver_message_id: int) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE photos SET receiver_message_id = ? WHERE public_id = ?", (receiver_message_id, public_id))
+
+
+def cancel_open_order_in_db(public_id: str, sender_chat_id: int) -> tuple[bool, str, sqlite3.Row | None, int]:
+    """Cancel an unaccepted/open QR order after the sender cancel wait period.
+
+    Returns (ok, message_key, original_row, seconds_left).  The wallet reserve is
+    released in the same transaction so a canceled order cannot leave funds stuck.
+    """
+    public_id = str(public_id or "").strip()
+    if not public_id:
+        return False, "cancel_order_not_found", None, 0
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM photos WHERE public_id = ?", (public_id,)).fetchone()
+        if not row:
+            conn.rollback()
+            return False, "cancel_order_not_found", None, 0
+        if int(row["sender_chat_id"] or 0) != int(sender_chat_id):
+            conn.rollback()
+            return False, "cancel_order_sender_only", row, 0
+        status = str(row["status"] or "").lower()
+        if status != "pending":
+            conn.rollback()
+            return False, "cancel_order_already_processed", row, 0
+        if str(row["offer_state"] or "").lower() != "open" or int(row["receiver_chat_id"] or 0) != 0:
+            conn.rollback()
+            return False, "cancel_order_already_accepted", row, 0
+        if iso_is_due(row["offer_expires_at"]):
+            conn.rollback()
+            return False, "cancel_order_expired", row, 0
+
+        age_seconds = seconds_since_iso(row["created_at"])
+        seconds_left = max(0, SENDER_CANCEL_WAIT_SECONDS - age_seconds)
+        if seconds_left > 0:
+            conn.rollback()
+            return False, "cancel_order_wait", row, seconds_left
+
+        now = now_iso()
+        sender_rate = _dec(row["sender_rate_usdt"])
+        release_amount = Decimal("0")
+        _wallet_snapshot(conn, sender_chat_id)
+        if sender_rate > 0:
+            wallet_before = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+            release_amount = min(_dec(wallet_before["reserved_usdt"]), sender_rate)
+            conn.execute(
+                "UPDATE wallets SET reserved_usdt = MAX(0, reserved_usdt - ?), updated_at = ? WHERE chat_id = ?",
+                (float(release_amount), now, sender_chat_id),
+            )
+            wallet_after = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+            available_after = _dec(wallet_after["balance_usdt"]) - _dec(wallet_after["reserved_usdt"])
+            conn.execute(
+                "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'scan_release', ?, ?, ?, ?, ?)",
+                (sender_chat_id, float(release_amount), float(available_after), "Sender canceled QR before acceptance", public_id, now),
+            )
+
+        cur = conn.execute(
+            """
+            UPDATE photos
+            SET status = 'failed', offer_state = 'canceled', status_by = ?, status_at = ?, settled_at = ?, charged_usdt = 0, earned_usdt = 0
+            WHERE public_id = ? AND status = 'pending' AND offer_state = 'open' AND COALESCE(receiver_chat_id, 0) = 0
+            """,
+            (sender_chat_id, now, now, public_id),
+        )
+        if cur.rowcount <= 0:
+            conn.rollback()
+            return False, "cancel_order_failed", row, 0
+        conn.commit()
+        return True, "cancel_order_done", row, 0
 
 
 def generate_dispute_ref(conn: sqlite3.Connection | None = None) -> str:
@@ -6206,6 +6494,14 @@ def failure_reason_keyboard(public_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def sender_open_offer_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(tr_chat(chat_id, "btn_cancel_open_order"), callback_data=f"cancelorder:{public_id}")],
+        ]
+    )
+
+
 def sender_notify_keyboard(public_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -6235,6 +6531,32 @@ def split_chunks(lines: list[str], max_len: int = 3500) -> Iterable[str]:
 
 
 def main_menu_keyboard(user: UserRow | None = None, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    if is_admin(chat_id):
+        return InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_wallet"), callback_data="nav:wallet"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_earnings"), callback_data="nav:earnings"),
+                ],
+                [
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_status"), callback_data="nav:status"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_pending_qr"), callback_data="nav:pending"),
+                ],
+                [
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_messages"), callback_data="nav:messages"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_history"), callback_data="nav:history"),
+                ],
+                [
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_stats"), callback_data="nav:stats"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data="nav:dispute"),
+                ],
+                [
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_commands"), callback_data="nav:commands"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_language"), callback_data="nav:language"),
+                ],
+                [InlineKeyboardButton(tr_chat(chat_id, "btn_support"), callback_data="nav:support")],
+            ]
+        )
     if user and user.active and user.role == "receiver":
         return InlineKeyboardMarkup(
             [
@@ -6289,6 +6611,11 @@ def main_menu_keyboard(user: UserRow | None = None, chat_id: int | None = None) 
 
 
 def main_menu_text(user: UserRow | None, chat_id: int) -> str:
+    if is_admin(chat_id):
+        return (
+            "🛡️ <b>Admin account</b>\n\n"
+            "You can use sender and receiver bot commands. Admin IDs are not excluded from broadcasts, marketplace offers, or marketplace messages."
+        )
     if user and user.active and user.role == "sender":
         return tr_chat(chat_id, "registered_sender")
     if user and user.active and user.role == "receiver":
@@ -6298,7 +6625,9 @@ def main_menu_text(user: UserRow | None, chat_id: int) -> str:
 
 def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) -> str:
     lines = [tr_chat(chat_id, "commands_title")]
-    if user and user.active:
+    if is_admin(chat_id):
+        lines.append(tr_chat(chat_id, "commands_role", role="admin"))
+    elif user and user.active:
         lines.append(tr_chat(chat_id, "commands_role", role=user.role))
     lines.extend([
         "",
@@ -6313,7 +6642,7 @@ def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) 
         tr_chat(chat_id, "cmd_dispute"),
         tr_chat(chat_id, "cmd_stats"),
     ])
-    if user and user.active and user.role == "sender":
+    if is_admin(chat_id) or (user and user.active and user.role == "sender"):
         lines.extend([
             "",
             tr_chat(chat_id, "commands_sender"),
@@ -6322,7 +6651,7 @@ def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) 
             tr_chat(chat_id, "cmd_wallet"),
             tr_chat(chat_id, "cmd_loadwallet"),
         ])
-    elif user and user.active and user.role == "receiver":
+    if is_admin(chat_id) or (user and user.active and user.role == "receiver"):
         lines.extend([
             "",
             tr_chat(chat_id, "commands_receiver"),
@@ -6334,7 +6663,7 @@ def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) 
             tr_chat(chat_id, "cmd_earnings"),
             tr_chat(chat_id, "cmd_withdraw"),
         ])
-    else:
+    if not is_admin(chat_id) and not (user and user.active):
         lines.extend(["", tr_chat(chat_id, "commands_after_activation")])
     return "\n".join(lines)
 
@@ -6433,13 +6762,19 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     chat_id = update.effective_chat.id
-
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
 
-    if user.role == "sender":
+    if is_admin(chat_id):
+        text = (
+            stats_summary_text("Your sender stats", sender_chat_id=chat_id)
+            + "\n\n"
+            + stats_summary_text("Your receiver stats", receiver_chat_id=chat_id)
+        )
+        await update.message.reply_text(text)
+    elif user and user.role == "sender":
         await update.message.reply_text(stats_summary_text("Your sender stats", sender_chat_id=chat_id))
     else:
         await update.message.reply_text(stats_summary_text("Your receiver stats", receiver_chat_id=chat_id))
@@ -6575,8 +6910,8 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not update.message or not update.effective_chat:
         return
     chat_id = update.effective_chat.id
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
     text, markup = _qr_history_text_keyboard(chat_id, user, 0)
@@ -6589,8 +6924,8 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     chat_id = update.effective_chat.id
 
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "only_active_receivers"))
         return
     text, markup = _receiver_pending_text_keyboard(chat_id)
@@ -6604,6 +6939,9 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 def _audience_allows(audience: str, role: str) -> bool:
+    role = str(role or "").strip().lower()
+    if role == "admin":
+        return True
     return str(audience or "").strip().lower() in {role, "both"}
 
 
@@ -6628,7 +6966,8 @@ def _message_event_route(initiator_chat_id: int, initiator_role: str, recipient_
 
 
 def _messages_menu_text(user: UserRow, chat_id: int | None = None) -> str:
-    target_key = "target_receivers" if user.role == "sender" else "target_senders"
+    menu_role = "sender" if is_admin(chat_id) else user.role
+    target_key = "target_receivers" if menu_role == "sender" else "target_senders"
     target = tr_chat(chat_id, target_key)
     return (
         f"{tr_chat(chat_id, 'marketplace_messages_title')}\n\n"
@@ -6637,8 +6976,8 @@ def _messages_menu_text(user: UserRow, chat_id: int | None = None) -> str:
 
 
 async def _show_messages_menu(message_or_query, chat_id: int) -> None:
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         text = tr_chat(chat_id, "not_registered")
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text)
@@ -6646,7 +6985,8 @@ async def _show_messages_menu(message_or_query, chat_id: int) -> None:
             await message_or_query.reply_text(text)
         return
 
-    markup = build_template_keyboard(user.role, chat_id)
+    menu_role = "sender" if is_admin(chat_id) else (user.role if user else "sender")
+    markup = build_template_keyboard(menu_role, chat_id)
     if not markup:
         text = tr_chat(chat_id, "no_presets")
         back = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]])
@@ -6697,8 +7037,8 @@ async def preset_send_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer(tr_chat(chat_id, "invalid_preset_button"), show_alert=True)
         return
 
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await query.answer(tr_chat(chat_id, "not_registered"), show_alert=True)
         return
 
@@ -6712,12 +7052,13 @@ async def preset_send_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not template or not int(template["active"]):
         await query.answer(tr_chat(chat_id, "preset_not_active"), show_alert=True)
         return
-    if not _audience_allows(str(template["audience"]), user.role):
+    initiator_role = "sender" if is_admin(chat_id) else (user.role if user else "sender")
+    if not _audience_allows(str(template["audience"]), "admin" if is_admin(chat_id) else initiator_role):
         await query.answer(tr_chat(chat_id, "preset_not_for_role"), show_alert=True)
         return
 
-    recipient_role = _opposite_role(user.role)
-    recipients = [r for r in _preset_recipients_for_role(user.role) if int(r["chat_id"]) != chat_id]
+    recipient_role = _opposite_role(initiator_role)
+    recipients = [r for r in _preset_recipients_for_role(initiator_role) if int(r["chat_id"]) != chat_id]
     if not recipients:
         await query.answer(tr_chat(chat_id, "no_active_recipients", role=tr_chat(chat_id, "target_" + recipient_role + "s")), show_alert=True)
         return
@@ -6727,7 +7068,7 @@ async def preset_send_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     failed = 0
     for recipient in recipients:
         recipient_chat_id = int(recipient["chat_id"])
-        sender_chat_id, receiver_chat_id, direction = _message_event_route(chat_id, user.role, recipient_chat_id)
+        sender_chat_id, receiver_chat_id, direction = _message_event_route(chat_id, initiator_role, recipient_chat_id)
         event_id = create_message_event(
             template_id=template_id,
             initiator_chat_id=chat_id,
@@ -6805,8 +7146,8 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer(tr_chat(chat_id, "invalid_reply_button"), show_alert=True)
         return
 
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await query.answer(tr_chat(chat_id, "not_registered"), show_alert=True)
         return
 
@@ -6821,7 +7162,8 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     if int(reply["template_id"]) != int(event["template_id"]):
         await query.answer(tr_chat(chat_id, "reply_mismatch"), show_alert=True)
         return
-    if not _audience_allows(str(reply["audience"]), user.role):
+    recipient_role_for_check = "admin" if is_admin(chat_id) else (user.role if user else "")
+    if not _audience_allows(str(reply["audience"]), recipient_role_for_check):
         await query.answer(tr_chat(chat_id, "reply_not_for_role"), show_alert=True)
         return
 
@@ -6884,8 +7226,8 @@ async def on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.effective_chat:
         return
     chat_id = update.effective_chat.id
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "only_active_receivers_on"))
         return
     try:
@@ -6910,8 +7252,8 @@ async def off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.effective_chat:
         return
     chat_id = update.effective_chat.id
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "only_active_receivers_off"))
         return
     set_receiver_offline(chat_id)
@@ -6927,14 +7269,15 @@ async def marketplace_status_cmd(update: Update, context: ContextTypes.DEFAULT_T
     observe_telegram_profile(update.effective_user)
     if not update.message or not update.effective_chat:
         return
-    user = get_user(update.effective_chat.id)
-    if not user or not user.active:
-        await update.message.reply_text(tr_chat(update.effective_chat.id, "not_registered"))
+    chat_id = update.effective_chat.id
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
+        await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
-    if user.role == "receiver":
+    if not is_admin(chat_id) and user and user.role == "receiver":
         await update.message.reply_text(tr_chat(update.effective_chat.id, "sender_status_only"))
         return
-    await update.message.reply_text(marketplace_status_text(update.effective_chat.id))
+    await update.message.reply_text(marketplace_status_text(chat_id))
 
 
 # In-memory wallet top-up states. These are short flows only; deposits themselves are persisted.
@@ -7417,11 +7760,11 @@ def _wallet_history_text(chat_id: int, page: int = 0, page_size: int = 10) -> tu
 
 
 async def _send_wallet_home(message, chat_id: int) -> None:
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await message.reply_text(tr_chat(chat_id, "not_registered"))
         return
-    if user.role == "sender":
+    if is_admin(chat_id) or (user and user.role == "sender"):
         await message.reply_text(
             _sender_wallet_text(chat_id),
             parse_mode="Markdown",
@@ -7595,11 +7938,11 @@ async def wallet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not update.message or not update.effective_chat:
         return
     chat_id = update.effective_chat.id
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
-    if user.role != "sender":
+    if not can_use_sender_features(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "only_active_senders_wallet"))
         return
     await update.message.reply_text(
@@ -7614,8 +7957,8 @@ async def loadwallet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not update.message or not update.effective_chat:
         return
     chat_id = update.effective_chat.id
-    user = get_user(chat_id)
-    if not user or user.role != "sender" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_sender_features(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "only_active_senders_load"))
         return
     if not context.args:
@@ -7645,7 +7988,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     chat_id = query.message.chat.id
     data = query.data or ""
-    user = get_user(chat_id)
+    user = get_user_for_chat(chat_id)
 
     if data == "nav:commands":
         await query.edit_message_text(
@@ -7679,7 +8022,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
 
-    if not user or not user.active:
+    if not is_active_user_or_admin(chat_id, user):
         await query.edit_message_text(
             tr_chat(chat_id, "not_registered_support"),
             reply_markup=InlineKeyboardMarkup([
@@ -7694,21 +8037,21 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     if data == "nav:wallet":
-        if user.role == "receiver":
-            await query.edit_message_text(
-                _receiver_earnings_text(chat_id),
-                parse_mode="Markdown",
-                reply_markup=_wallet_main_keyboard("receiver", chat_id),
-            )
-        else:
-            await query.edit_message_text(
-                _sender_wallet_text(chat_id),
-                parse_mode="Markdown",
-                reply_markup=_wallet_main_keyboard("sender", chat_id),
-            )
+        await query.edit_message_text(
+            _sender_wallet_text(chat_id) if is_admin(chat_id) or (user and user.role == "sender") else _receiver_earnings_text(chat_id),
+            parse_mode="Markdown",
+            reply_markup=_wallet_main_keyboard("sender" if is_admin(chat_id) or (user and user.role == "sender") else "receiver", chat_id),
+        )
+        return
+    if data == "nav:earnings":
+        await query.edit_message_text(
+            _receiver_earnings_text(chat_id),
+            parse_mode="Markdown",
+            reply_markup=_wallet_main_keyboard("receiver", chat_id),
+        )
         return
     if data == "nav:loadwallet":
-        if user.role != "sender":
+        if not can_use_sender_features(chat_id, user):
             await query.edit_message_text(tr_chat(chat_id, "only_senders_load"))
             return
         settings = get_marketplace_settings()
@@ -7726,7 +8069,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
     if data == "nav:status":
-        if user.role != "sender":
+        if not can_use_sender_features(chat_id, user):
             await query.edit_message_text(
                 tr_chat(chat_id, "sender_status_only_menu"),
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]),
@@ -7738,7 +8081,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
     if data == "nav:pending":
-        if user.role != "receiver":
+        if not can_use_receiver_features(chat_id, user):
             await query.edit_message_text(tr_chat(chat_id, "only_receivers_pending"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]))
             return
         text, markup = _receiver_pending_text_keyboard(chat_id)
@@ -7763,7 +8106,9 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return
     if data == "nav:stats":
-        if user.role == "sender":
+        if is_admin(chat_id):
+            text = stats_summary_text("Your sender stats", sender_chat_id=chat_id) + "\n\n" + stats_summary_text("Your receiver stats", receiver_chat_id=chat_id)
+        elif user and user.role == "sender":
             text = stats_summary_text("Your sender stats", sender_chat_id=chat_id)
         else:
             text = stats_summary_text("Your receiver stats", receiver_chat_id=chat_id)
@@ -7779,8 +8124,8 @@ async def wallet_currency_button(update: Update, context: ContextTypes.DEFAULT_T
     if not query or not query.message:
         return
     chat_id = query.message.chat.id
-    user = get_user(chat_id)
-    if not user or user.role != "sender" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_sender_features(chat_id, user):
         await query.answer("Only active senders can load wallet.", show_alert=True)
         return
     network = (query.data or "").split(":", 1)[1].strip().lower()
@@ -7796,8 +8141,8 @@ async def qr_history_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not query or not query.message:
         return
     chat_id = query.message.chat.id
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await query.answer("You are not registered.", show_alert=True)
         return
     await query.answer()
@@ -7814,8 +8159,8 @@ async def wallet_history_button(update: Update, context: ContextTypes.DEFAULT_TY
     if not query or not query.message:
         return
     chat_id = query.message.chat.id
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await query.answer("You are not registered.", show_alert=True)
         return
     await query.answer()
@@ -7957,8 +8302,8 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not update.message or not update.effective_chat or not update.message.text:
         return
     chat_id = update.effective_chat.id
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         return
     text = update.message.text.strip()
     if chat_id in FAIL_REASON_FLOW:
@@ -8127,11 +8472,11 @@ async def earnings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not update.message or not update.effective_chat:
         return
     chat_id = update.effective_chat.id
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await update.message.reply_text("You are not registered yet.")
         return
-    if user.role != "receiver":
+    if not can_use_receiver_features(chat_id, user):
         await update.message.reply_text("Only active receivers can use /earnings.")
         return
     await update.message.reply_text(
@@ -8190,8 +8535,8 @@ async def _send_withdraw_payment_choice_prompt(message_or_query, chat_id: int, a
 
 
 async def _send_withdraw_prompt(message_or_query, chat_id: int) -> None:
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         text = "Only active receivers can request payout."
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text)
@@ -8222,15 +8567,16 @@ async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     observe_telegram_profile(update.effective_user)
     if not update.message or not update.effective_chat:
         return
-    user = get_user(update.effective_chat.id)
-    if not user or user.role != "receiver" or not user.active:
+    chat_id = update.effective_chat.id
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await update.message.reply_text("Only active receivers can request payout.")
         return
     if context.args:
         amount = _dec(context.args[0])
-        await submit_withdraw_amount(update.message, update.effective_chat.id, amount)
+        await submit_withdraw_amount(update.message, chat_id, amount)
         return
-    await _send_withdraw_prompt(update.message, update.effective_chat.id)
+    await _send_withdraw_prompt(update.message, chat_id)
 
 
 async def withdraw_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -8239,8 +8585,8 @@ async def withdraw_button(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     chat_id = query.message.chat.id
     data = query.data or "withdraw:start"
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await query.answer("Only active receivers can request payout.", show_alert=True)
         return
     await query.answer()
@@ -8268,8 +8614,8 @@ async def withdraw_button(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def submit_withdraw_details(message, chat_id: int, details_text: str) -> None:
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await message.reply_text("Only active receivers can request payout.")
         return
     details = clean_payout_details_text(details_text)
@@ -8288,8 +8634,8 @@ async def submit_withdraw_details(message, chat_id: int, details_text: str) -> N
 
 
 async def submit_withdraw_amount(message, chat_id: int, amount: Decimal) -> None:
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await message.reply_text("Only active receivers can request payout.")
         return
     settings = get_marketplace_settings()
@@ -8316,8 +8662,8 @@ async def submit_withdraw_amount(message, chat_id: int, amount: Decimal) -> None
 
 
 async def submit_withdraw_request(message_or_query, chat_id: int, amount: Decimal, payout_details: str) -> None:
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         text = "Only active receivers can request payout."
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text)
@@ -8357,7 +8703,9 @@ async def submit_withdraw_request(message_or_query, chat_id: int, amount: Decima
 def _dispute_public_id_from_reply(chat_id: int, user: UserRow, reply_message_id: int | None) -> str | None:
     if not reply_message_id:
         return None
-    if user.role == "receiver":
+    if is_admin(chat_id):
+        photo = find_photo_by_receiver_message_id(chat_id, reply_message_id) or find_photo_by_sender_message_id(chat_id, reply_message_id)
+    elif user.role == "receiver":
         photo = find_photo_by_receiver_message_id(chat_id, reply_message_id)
     else:
         photo = find_photo_by_sender_message_id(chat_id, reply_message_id)
@@ -8370,6 +8718,8 @@ def _validate_dispute_public_id(chat_id: int, user: UserRow, public_id: str | No
     row = get_photo_record(public_id)
     if not row:
         return False, "I could not find that QR ID."
+    if is_admin(chat_id):
+        return True, None
     if user.role == "sender" and int(row["sender_chat_id"]) != chat_id:
         return False, "That QR ID is not linked to your sender account."
     if user.role == "receiver" and int(row["receiver_chat_id"] or 0) != chat_id:
@@ -8381,8 +8731,9 @@ async def dispute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     observe_telegram_profile(update.effective_user)
     if not update.message or not update.effective_chat:
         return
-    user = get_user(update.effective_chat.id)
-    if not user or not user.active:
+    chat_id = update.effective_chat.id
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await update.message.reply_text("You are not registered yet.")
         return
 
@@ -8390,14 +8741,14 @@ async def dispute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if context.args and re.fullmatch(r"\d{4}-\d{2}-\d{2}-\d{4}", context.args[0].strip()):
         public_id = context.args[0].strip()
     if not public_id and update.message.reply_to_message:
-        public_id = _dispute_public_id_from_reply(update.effective_chat.id, user, update.message.reply_to_message.message_id)
+        public_id = _dispute_public_id_from_reply(chat_id, user, update.message.reply_to_message.message_id)
 
-    ok, error = _validate_dispute_public_id(update.effective_chat.id, user, public_id)
+    ok, error = _validate_dispute_public_id(chat_id, user, public_id)
     if not ok:
         await update.message.reply_text(error or "Could not start that dispute.")
         return
 
-    DISPUTE_FLOW[update.effective_chat.id] = {"public_id": public_id, "step": "reason"}
+    DISPUTE_FLOW[chat_id] = {"public_id": public_id, "step": "reason"}
     qr_line = f"\nQR ID: `{public_id}`" if public_id else ""
     await update.message.reply_text(
         "⚠️ *Open dispute*\n"
@@ -8413,8 +8764,8 @@ async def dispute_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     await query.answer()
     chat_id = query.message.chat.id
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await query.message.reply_text("You are not registered yet.")
         return
     public_id = (query.data or "").split(":", 1)[1].strip()
@@ -8433,8 +8784,8 @@ async def dispute_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def submit_dispute_reason(message, chat_id: int, reason: str) -> None:
-    user = get_user(chat_id)
-    if not user or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
         await message.reply_text(tr_chat(chat_id, "not_registered"))
         DISPUTE_FLOW.pop(chat_id, None)
         return
@@ -8556,6 +8907,51 @@ async def dispute_reply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await submit_dispute_chat_reply(update.message, chat_id, reply_text)
 
 
+async def enforce_qr_expiry_after_delay(application: Application, public_id: str, expires_at: str | datetime | None) -> None:
+    """Expire a single QR as soon as its configured expiry time passes.
+
+    This is an extra runtime guard on top of marketplace_watcher().  The watcher
+    still handles restarts and missed tasks; this task makes live orders expire
+    close to the configured QR_EXPIRE_MINUTES value even after a receiver claims
+    the QR.
+    """
+    try:
+        delay = seconds_until_iso(expires_at)
+        if delay > 0:
+            await asyncio.sleep(delay + 1)
+        row = get_photo_record(public_id)
+        if not row:
+            return
+        if str(row["status"] or "").lower() != "pending":
+            return
+        if str(row["offer_state"] or "").lower() not in {"open", "claimed"}:
+            return
+        if not iso_is_due(row["offer_expires_at"]):
+            return
+        ok, _msg, expired_row = expire_pending_qr_in_db(public_id)
+        if ok and expired_row is not None:
+            await notify_qr_expired_by_timeout(application.bot, public_id, expired_row)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("QR expiry task failed for %s", public_id)
+
+
+def schedule_qr_expiry_task(application: Application | None, public_id: str, expires_at: str | datetime | None) -> None:
+    if application is None:
+        return
+    try:
+        application.create_task(
+            enforce_qr_expiry_after_delay(application, public_id, expires_at),
+            name=f"qr_expiry_{public_id}",
+        )
+    except TypeError:
+        # Older python-telegram-bot versions may not accept name=.
+        application.create_task(enforce_qr_expiry_after_delay(application, public_id, expires_at))
+    except Exception:
+        logger.exception("Could not schedule QR expiry task for %s", public_id)
+
+
 async def send_offer_to_receivers(context: ContextTypes.DEFAULT_TYPE, public_id: str) -> tuple[int, int]:
     row = get_photo_record(public_id)
     if not row:
@@ -8605,8 +9001,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if chat.type != ChatType.PRIVATE:
         return
 
-    user = get_user(chat.id)
-    if not user or user.role != "sender" or not user.active:
+    user = get_user_for_chat(chat.id)
+    if not can_use_sender_features(chat.id, user):
         await update.message.reply_text("Only an active registered sender can send QR photos.")
         return
 
@@ -8695,6 +9091,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         receiver_rate=receiver_rate,
         expires_at=expires_at,
     )
+    schedule_qr_expiry_task(context.application, public_id, expires_at)
 
     sent, failed = await send_offer_to_receivers(context, public_id)
     if sent <= 0:
@@ -8724,6 +9121,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 expires_at=expires_at,
                 sender_rate=sender_rate,
             ),
+            reply_markup=sender_open_offer_keyboard(public_id, chat.id),
         )
 
     await delete_original_sender_message_safely(context, chat.id, update.message.message_id)
@@ -8743,9 +9141,9 @@ async def resolve_pending_photo_for_status(
     public_id: str | None = None,
     reply_to_message_id: int | None = None,
 ) -> tuple[PhotoRow | None, str | None]:
-    actor = get_user(actor_chat_id)
+    actor = get_user_for_chat(actor_chat_id)
 
-    if not actor or actor.role != "receiver" or not actor.active:
+    if not can_use_receiver_features(actor_chat_id, actor):
         return None, "Only the assigned receiver can mark photos."
 
     if public_id:
@@ -8768,7 +9166,7 @@ async def resolve_pending_photo_for_status(
     if photo.status != "pending":
         return None, f"That photo is already marked {photo.status.upper()}."
 
-    if record["offer_expires_at"] and str(record["offer_expires_at"]) <= now_iso():
+    if iso_is_due(record["offer_expires_at"]):
         expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(photo.public_id)
         if expired_ok and expired_row is not None:
             await notify_qr_expired_by_timeout(bot, photo.public_id, expired_row)
@@ -8996,10 +9394,16 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     receiver_chat_id = query.message.chat.id
     ok, result, row, auto_off = claim_offer_in_db(public_id, receiver_chat_id)
     if not ok:
-        await query.answer(result, show_alert=True)
+        if result == "Offer expired.":
+            expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
+            if expired_ok and expired_row is not None:
+                await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
+        result_text = tr_chat(receiver_chat_id, result) if result == "claim_offer_canceled" else result
+        await query.answer(result_text, show_alert=True)
         try:
-            await query.edit_message_text(f"⛔ {result}\n🆔 Offer ID: {public_id}")
-            set_offer_notification_state(public_id, receiver_chat_id, "expired")
+            state = "canceled" if result == "claim_offer_canceled" else "expired"
+            await query.edit_message_text(f"⛔ {result_text}\n🆔 Offer ID: {public_id}")
+            set_offer_notification_state(public_id, receiver_chat_id, state)
         except TelegramError:
             pass
         return
@@ -9078,6 +9482,63 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await notify_active_senders(context, "🔴 A receiver reached their limit and is now offline. Use /status for current capacity.")
 
 
+async def cancel_order_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    try:
+        _action, public_id = (query.data or "").split(":", 1)
+    except Exception:
+        await query.answer("Invalid cancel button.", show_alert=True)
+        return
+
+    sender_chat_id = query.message.chat.id
+    ok, message_key, row, seconds_left = cancel_open_order_in_db(public_id, sender_chat_id)
+    if not ok:
+        if message_key == "cancel_order_expired":
+            expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
+            if expired_ok and expired_row is not None:
+                await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
+        kwargs = {"seconds": seconds_left}
+        if row is not None:
+            kwargs["status"] = str(row["status"] or "").upper()
+        await query.answer(tr_chat(sender_chat_id, message_key, **kwargs), show_alert=True)
+        return
+
+    assert row is not None
+    canceled_caption = build_sender_offer_caption(
+        str(row["date"]),
+        int(row["daily_no"]),
+        public_id,
+        tr_chat(sender_chat_id, "cancel_order_status_line"),
+    )
+    try:
+        await context.bot.edit_message_caption(
+            chat_id=sender_chat_id,
+            message_id=int(row["sender_message_id"] or query.message.message_id),
+            caption=canceled_caption,
+            reply_markup=None,
+        )
+    except TelegramError as exc:
+        logger.warning("Could not edit canceled sender QR %s/%s: %s", sender_chat_id, public_id, exc)
+
+    # Remove receiver-side accept buttons so late receivers cannot try to claim it.
+    for note in offer_notifications(public_id):
+        receiver_chat_id = int(note["receiver_chat_id"])
+        try:
+            await context.bot.edit_message_text(
+                chat_id=receiver_chat_id,
+                message_id=int(note["message_id"]),
+                text=tr_chat(receiver_chat_id, "offer_canceled_receiver_text", public_id=public_id),
+            )
+            set_offer_notification_state(public_id, receiver_chat_id, "canceled")
+            await asyncio.sleep(0.02)
+        except TelegramError as exc:
+            logger.debug("Could not edit canceled offer notification %s/%s: %s", receiver_chat_id, public_id, exc)
+
+    await query.answer(tr_chat(sender_chat_id, "cancel_order_done"), show_alert=False)
+
+
 async def notify_receiver_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.message:
@@ -9107,7 +9568,7 @@ async def notify_receiver_button(update: Update, context: ContextTypes.DEFAULT_T
     if offer_state != "claimed" or receiver_chat_id <= 0:
         await query.answer("No receiver has accepted this QR yet.", show_alert=True)
         return
-    if row["offer_expires_at"] and str(row["offer_expires_at"]) <= now_iso():
+    if iso_is_due(row["offer_expires_at"]):
         expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
         if expired_ok and expired_row is not None:
             await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
@@ -9142,8 +9603,8 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer("Invalid QR button.", show_alert=True)
         return
     chat_id = query.message.chat.id
-    user = get_user(chat_id)
-    if not user or user.role != "receiver" or not user.active:
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
         await query.answer("Only active receivers can open pending QRs.", show_alert=True)
         return
     row = get_photo_record(public_id)
@@ -9153,7 +9614,7 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if str(row["status"]) != "pending" or str(row["offer_state"]) != "claimed":
         await query.answer("This QR is no longer pending.", show_alert=True)
         return
-    if row["offer_expires_at"] and str(row["offer_expires_at"]) <= now_iso():
+    if iso_is_due(row["offer_expires_at"]):
         expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
         if expired_ok and expired_row is not None:
             await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
@@ -9229,11 +9690,12 @@ async def button_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) -> None:
+    expired_at = qr_expiry_status_at(row)
     expired_offer_text = f"⏱ Offer expired.\n🆔 Offer ID: {public_id}\nThis QR can no longer be accepted or completed."
     expired_caption = (
         f"{build_caption(str(row['date']), int(row['daily_no']), public_id)}\n\n"
         "⏱ Status: EXPIRED\n"
-        f"🕒 Updated: {display_datetime()}\n"
+        f"🕒 Updated: {display_datetime(expired_at)}\n"
         "💳 Sender reserve released."
     )
     claimed_receiver_id = int(row["receiver_chat_id"] or 0)
@@ -9291,7 +9753,12 @@ async def expire_offer_runtime(bot, public_id: str, row: sqlite3.Row, reason_tex
 
 
 def expire_pending_qr_in_db(public_id: str) -> tuple[bool, str, sqlite3.Row | None]:
-    """Admin action: expire any pending QR, whether still open or already claimed."""
+    """Expire any pending QR, whether still open or already claimed.
+
+    The expiry timestamp is the configured offer_expires_at value, not the time
+    this cleanup function happened to run.  This keeps admin duration correct and
+    enforces QR_EXPIRE_MINUTES across both open and claimed orders.
+    """
     public_id = public_id.strip()
     if not public_id:
         return False, "QR ID is missing.", None
@@ -9304,13 +9771,14 @@ def expire_pending_qr_in_db(public_id: str) -> tuple[bool, str, sqlite3.Row | No
         if str(row["status"]).lower() != "pending":
             conn.rollback()
             return False, f"QR is already marked {str(row['status']).upper()}.", row
+        expires_at = qr_expiry_status_at(row)
         cur = conn.execute(
             """
             UPDATE photos
-            SET status = 'failed', offer_state = 'expired', status_by = NULL, status_at = ?
+            SET status = 'failed', offer_state = 'expired', status_by = NULL, status_at = ?, failure_reason = COALESCE(NULLIF(failure_reason, ''), 'QR expired')
             WHERE public_id = ? AND status = 'pending'
             """,
-            (now_iso(), public_id),
+            (expires_at, public_id),
         )
         if cur.rowcount <= 0:
             conn.rollback()
@@ -10062,28 +10530,25 @@ def payment_manual_check_label(row: sqlite3.Row) -> str:
         return "Waiting for review"
     return "Payment check pending"
 
+def effective_qr_status_at(row: sqlite3.Row) -> str | None:
+    status_at = row["status_at"] if "status_at" in row.keys() else None
+    if str(row["status"] or "").lower() == "failed" and str(row["offer_state"] or "").lower() == "expired":
+        expires_at = row["offer_expires_at"] if "offer_expires_at" in row.keys() else None
+        if expires_at:
+            return str(expires_at)
+    return str(status_at) if status_at else None
+
+
 def completed_value(row: sqlite3.Row) -> str:
     status = str(row["status"] or "pending").lower()
-    if status in {"done", "failed"} and row["status_at"]:
-        return display_datetime(row["status_at"])
+    final_at = effective_qr_status_at(row)
+    if status in {"done", "failed"} and final_at:
+        return display_datetime(final_at)
     return "—"
 
 
 def _parse_iso_dt(value: str | datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        try:
-            dt = datetime.fromisoformat(str(value))
-        except Exception:
-            return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=ZoneInfo(BOT_TZ))
-    else:
-        dt = dt.astimezone(ZoneInfo(BOT_TZ))
-    return dt
+    return parse_bot_datetime(value)
 
 
 def duration_between(start_value: str | datetime | None, end_value: str | datetime | None) -> str:
@@ -10106,8 +10571,9 @@ def duration_between(start_value: str | datetime | None, end_value: str | dateti
 
 def qr_duration_value(row: sqlite3.Row) -> str:
     status = str(row["status"] or "pending").lower()
-    if status in {"done", "failed"} and row["status_at"]:
-        return duration_between(row["created_at"], row["status_at"])
+    final_at = effective_qr_status_at(row)
+    if status in {"done", "failed"} and final_at:
+        return duration_between(row["created_at"], final_at)
     if row["claimed_at"]:
         return duration_between(row["created_at"], row["claimed_at"]) + " to claim"
     return "—"
@@ -12378,6 +12844,7 @@ def admin_broadcast_form_html(action: str = "/admin/broadcast") -> str:
         ("all", "All active users"),
         ("sender", "Senders only"),
         ("receiver", "Receivers only"),
+        ("admin", "Admins only"),
     ]
     lang_html = "".join(f'<option value="{esc(code)}">{esc(label)}</option>' for code, label in language_options)
     role_html = "".join(f'<option value="{esc(code)}">{esc(label)}</option>' for code, label in role_options)
@@ -12399,7 +12866,7 @@ def admin_broadcast_form_html(action: str = "/admin/broadcast") -> str:
 
 def admin_broadcast_counts_html() -> str:
     languages = [("all", "All languages")] + [(code, meta["name"]) for code, meta in SUPPORTED_LANGUAGES.items()]
-    roles = [("all", "All"), ("sender", "Senders"), ("receiver", "Receivers")]
+    roles = [("all", "All"), ("sender", "Senders"), ("receiver", "Receivers"), ("admin", "Admins")]
     rows_html = ""
     for code, label in languages:
         cells = []
@@ -12413,10 +12880,10 @@ def admin_broadcast_counts_html() -> str:
     return f'''
     <div class="card"><h3>Audience counts</h3>
       <div class="table-wrap"><table class="compact-table">
-        <tr><th>Language</th><th>All</th><th>Senders</th><th>Receivers</th></tr>
+        <tr><th>Language</th><th>All</th><th>Senders</th><th>Receivers</th><th>Admins</th></tr>
         {rows_html}
       </table></div>
-      <p class="muted small">Counts include active users only.</p>
+      <p class="muted small">Counts include active users only. Admin IDs are not excluded; sender/receiver targets include matching users plus configured admin IDs, and Admins targets only configured admin IDs.</p>
     </div>
     '''
 
@@ -12424,7 +12891,7 @@ def admin_broadcast_counts_html() -> str:
 async def send_admin_language_broadcast_from_form(form, redirect_path: str) -> RedirectResponse:
     language_raw = str(form.get("language", "all")).strip().lower() or "all"
     role = str(form.get("role", "all")).strip().lower() or "all"
-    if role not in {"all", "sender", "receiver"}:
+    if role not in {"all", "sender", "receiver", "admin"}:
         role = "all"
     language = "all" if language_raw == "all" else normalize_language_code(language_raw)
     message_text = str(form.get("message_text", "")).strip()
@@ -13105,13 +13572,28 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
             ("earnings", "Show earnings"),
             ("withdraw", "Request payout"),
         ]
+    if role == "admin":
+        return common + [
+            ("status", "Show marketplace capacity"),
+            ("wallet", "Show wallet balance"),
+            ("loadwallet", "Top-up your wallet"),
+            ("on", "Go online with limit"),
+            ("off", "Go offline"),
+            ("pending", "Show pending QRs"),
+            ("done", "Mark replied QR done"),
+            ("failed", "Mark replied QR failed"),
+            ("earnings", "Show earnings"),
+            ("withdraw", "Request payout"),
+        ]
     return common
 
 
 async def refresh_bot_commands_for_chat(bot, chat_id: int, user: UserRow | None) -> None:
     try:
         scope = BotCommandScopeChat(chat_id=chat_id)
-        if user and user.active:
+        if is_admin(chat_id):
+            await bot.set_my_commands(bot_commands_for_role("admin"), scope=scope)
+        elif user and user.active:
             await bot.set_my_commands(bot_commands_for_role(user.role), scope=scope)
         else:
             await bot.delete_my_commands(scope=scope)
@@ -13159,7 +13641,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("pending", pending_cmd))
     app.add_handler(CommandHandler("done", done_cmd))
     app.add_handler(CommandHandler("failed", failed_cmd))
-    app.add_handler(CallbackQueryHandler(wallet_nav_button, pattern=r"^nav:(wallet|loadwallet|status|pending|history|dispute|stats|messages|commands|support|language|home)$"))
+    app.add_handler(CallbackQueryHandler(wallet_nav_button, pattern=r"^nav:(wallet|earnings|loadwallet|status|pending|history|dispute|stats|messages|commands|support|language|home)$"))
     app.add_handler(CallbackQueryHandler(language_button, pattern=r"^language:set:"))
     app.add_handler(CallbackQueryHandler(wallet_currency_button, pattern=r"^wallet_currency:"))
     app.add_handler(CallbackQueryHandler(wallet_history_button, pattern=r"^wallet_history:"))
@@ -13170,6 +13652,7 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(fail_reason_button, pattern=r"^failreason:"))
     app.add_handler(CallbackQueryHandler(dispute_qr_button, pattern=r"^disputeqr:"))
     app.add_handler(CallbackQueryHandler(dispute_reply_button, pattern=r"^disputereply:"))
+    app.add_handler(CallbackQueryHandler(cancel_order_button, pattern=r"^cancelorder:"))
     app.add_handler(CallbackQueryHandler(notify_receiver_button, pattern=r"^notify:"))
     app.add_handler(CallbackQueryHandler(check_payment_button, pattern=r"^checkpay:"))
     app.add_handler(CallbackQueryHandler(manual_payment_button, pattern=r"^manualpay:"))
