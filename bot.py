@@ -120,6 +120,12 @@ WEBHOOK_SECRET_TOKEN = os.getenv("WEBHOOK_SECRET_TOKEN", "").strip()
 PORT = int(os.getenv("PORT", "8080"))
 
 MAX_PROCESS_DIMENSION = int(os.getenv("MAX_PROCESS_DIMENSION", "1600"))
+# Keep the sender QR path fast. The bot first tries cheap decode paths and only
+# uses stronger screenshot fallbacks when needed. Increase this only if you prefer
+# accepting very bad screenshots over 2-3 second QR delivery.
+QR_DECODE_TIMEOUT_SECONDS = float(os.getenv("QR_DECODE_TIMEOUT_SECONDS", "2.4"))
+QR_FAST_ONLY = os.getenv("QR_FAST_ONLY", "false").strip().lower() in {"1", "true", "yes", "on"}
+QR_MAX_UPSCALE_DIMENSION = int(os.getenv("QR_MAX_UPSCALE_DIMENSION", "2200"))
 
 # Telegram privacy switch for the bot-generated clean QR messages.
 # - ALLOW_FORWARD_DOWNLOAD=true means users can forward/save/download the generated QR.
@@ -5097,8 +5103,25 @@ def validate_qr_data(data: str) -> str:
     return data
 
 
-def _decode_with_detector(detector: cv2.QRCodeDetector, image: np.ndarray) -> str | None:
-    # First reject multiple readable QR codes. One job = one QR.
+def _decode_single_fast(detector: cv2.QRCodeDetector, image: np.ndarray) -> str | None:
+    """Fast single-QR decode path used before expensive screenshot fallbacks."""
+    try:
+        data, points, _straight = detector.detectAndDecode(image)
+        if data and points is not None:
+            return data.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _decode_with_detector(detector: cv2.QRCodeDetector, image: np.ndarray, *, include_heavy: bool = False) -> str | None:
+    # Fast path first. For the normal sender flow this usually succeeds in milliseconds.
+    data = _decode_single_fast(detector, image)
+    if data:
+        return data
+
+    # Multi decode is useful to reject images with more than one readable QR, but it is
+    # slower than detectAndDecode. Run it only after the fast path did not decode.
     try:
         ok, decoded_info, _points, _straight = detector.detectAndDecodeMulti(image)
         if ok:
@@ -5111,30 +5134,67 @@ def _decode_with_detector(detector: cv2.QRCodeDetector, image: np.ndarray) -> st
     except ValueError:
         raise
     except Exception:
-        # Some OpenCV builds can fail on detectAndDecodeMulti; fallback below.
         pass
 
-    data, points, _straight = detector.detectAndDecode(image)
-    if data and points is not None:
-        return data.strip()
+    # Curved decode is comparatively expensive. Keep it as fallback only.
+    if include_heavy:
+        try:
+            data, points, _straight = detector.detectAndDecodeCurved(image)
+            if data and points is not None:
+                return data.strip()
+        except Exception:
+            pass
+
     return None
 
 
-def _add_qr_decode_attempt(attempts: list[np.ndarray], image: np.ndarray) -> None:
-    """Add a decode attempt while avoiding exact duplicate object references."""
-    if image is None:
-        return
-    attempts.append(image)
+def _try_decoded_data(data: str | None, last_error: ValueError | None) -> tuple[str | None, ValueError | None]:
+    if not data:
+        return None, last_error
+    try:
+        return validate_qr_data(data), None
+    except ValueError as exc:
+        return None, exc
 
 
-def _add_upscaled_qr_attempts(attempts: list[np.ndarray], image: np.ndarray) -> None:
+def _gray_image(image: np.ndarray) -> np.ndarray | None:
+    try:
+        if len(image.shape) == 3:
+            return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return image
+    except Exception:
+        return None
+
+
+def _decode_attempt_and_validate(
+    detector: cv2.QRCodeDetector,
+    image: np.ndarray,
+    *,
+    started_at: float,
+    timeout_seconds: float,
+    include_heavy: bool = False,
+    last_error: ValueError | None = None,
+) -> tuple[str | None, ValueError | None, bool]:
+    """Return (valid_data, last_error, timed_out)."""
+    if time.perf_counter() - started_at > timeout_seconds:
+        return None, last_error, True
+    try:
+        data = _decode_with_detector(detector, image, include_heavy=include_heavy)
+    except ValueError as exc:
+        return None, exc, False
+    valid, err = _try_decoded_data(data, last_error)
+    if valid:
+        return valid, None, False
+    return None, err, False
+
+
+def _iter_fast_scaled_images(image: np.ndarray):
     """
-    Add enlarged attempts for screenshots where the QR is small on the page.
+    Yield a small number of practical enlarged attempts lazily.
 
-    Stripe/Cashfree UPI mandate pages often show a valid mandate QR in the
-    middle of a full phone screenshot. OpenCV may detect the QR corners at the
-    original size but fail to decode the payload until the image is enlarged.
-    These attempts keep real mandate screenshots from being rejected as unreadable.
+    The previous decoder built many large denoised/threshold images before trying
+    any of them, which made time-limited UPI mandate QRs feel slow. This generator
+    creates one attempt at a time and stops as soon as decoding succeeds.
     """
     try:
         height, width = image.shape[:2]
@@ -5144,32 +5204,32 @@ def _add_upscaled_qr_attempts(attempts: list[np.ndarray], image: np.ndarray) -> 
     if largest <= 0:
         return
 
-    # Do not create huge images for already-large uploads. These targets are
-    # enough for small phone screenshots while staying safe for Railway memory.
-    for target_largest in (2200, 3200):
-        if largest >= target_largest:
+    # Real UPI mandate QR crops generally decode well at these sizes. Keep the
+    # cap modest so the sender gets the rebuilt QR quickly.
+    target_sizes = (700, 1000, 1400, min(QR_MAX_UPSCALE_DIMENSION, 1800), QR_MAX_UPSCALE_DIMENSION)
+    seen: set[int] = set()
+    for target_largest in target_sizes:
+        if target_largest <= largest:
+            continue
+        if target_largest > QR_MAX_UPSCALE_DIMENSION:
             continue
         scale = target_largest / largest
-        if scale <= 1.05:
+        scale_key = int(round(scale * 100))
+        if scale_key in seen or scale <= 1.05:
             continue
+        seen.add(scale_key)
         try:
             upscaled = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-            attempts.append(upscaled)
-            if len(upscaled.shape) == 3:
-                gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = upscaled
-            attempts.append(gray)
-            try:
-                _threshold, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                attempts.append(binary)
-            except Exception:
-                pass
         except Exception:
             continue
+        yield upscaled
+        gray = _gray_image(upscaled)
+        if gray is not None:
+            yield gray
 
 
 def decode_qr_data_from_bytes(image_bytes: bytes) -> str:
+    started_at = time.perf_counter()
     np_bytes = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(np_bytes, cv2.IMREAD_COLOR)
     if image is None:
@@ -5177,43 +5237,73 @@ def decode_qr_data_from_bytes(image_bytes: bytes) -> str:
 
     detector = cv2.QRCodeDetector()
     resized = resize_for_fast_qr_detection(image)
-    attempts: list[np.ndarray] = []
-
-    _add_qr_decode_attempt(attempts, resized)
-    try:
-        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-        _add_qr_decode_attempt(attempts, gray)
-    except Exception:
-        pass
-
-    # If the original upload was reduced for speed, also try the original.
-    if resized.shape[:2] != image.shape[:2]:
-        _add_qr_decode_attempt(attempts, image)
-
-    # Important for Stripe/Cashfree mandate screenshots: the QR can be small
-    # compared with the full screenshot, so upscaling is required to decode it.
-    _add_upscaled_qr_attempts(attempts, resized)
-    if resized.shape[:2] != image.shape[:2]:
-        _add_upscaled_qr_attempts(attempts, image)
-
+    timeout_seconds = max(0.8, QR_DECODE_TIMEOUT_SECONDS)
     last_error: ValueError | None = None
-    for attempt in attempts:
-        try:
-            data = _decode_with_detector(detector, attempt)
-        except ValueError as exc:
-            # Multiple readable QR codes is a hard rejection. Other attempts
-            # cannot safely decide which QR the sender intended.
-            last_error = exc
+
+    # 1) Ultra-fast path: normal QR photos/crops should finish here.
+    quick_images: list[np.ndarray] = [resized]
+    gray = _gray_image(resized)
+    if gray is not None:
+        quick_images.append(gray)
+    if resized.shape[:2] != image.shape[:2]:
+        quick_images.append(image)
+        original_gray = _gray_image(image)
+        if original_gray is not None:
+            quick_images.append(original_gray)
+
+    for attempt in quick_images:
+        valid, last_error, timed_out = _decode_attempt_and_validate(
+            detector,
+            attempt,
+            started_at=started_at,
+            timeout_seconds=timeout_seconds,
+            include_heavy=False,
+            last_error=last_error,
+        )
+        if valid:
+            return valid
+        if timed_out:
+            if last_error:
+                raise last_error
+            raise ValueError("QR decode timed out. Send a clearer crop of the QR code.")
+
+    if QR_FAST_ONLY:
+        if last_error:
+            raise last_error
+        raise ValueError("No readable QR code found. Send a clearer crop of the QR code.")
+
+    # 2) Limited screenshot fallback: useful for small QR crops, but lazy and capped.
+    for base in (resized, image) if resized.shape[:2] != image.shape[:2] else (resized,):
+        for attempt in _iter_fast_scaled_images(base):
+            valid, last_error, timed_out = _decode_attempt_and_validate(
+                detector,
+                attempt,
+                started_at=started_at,
+                timeout_seconds=timeout_seconds,
+                include_heavy=False,
+                last_error=last_error,
+            )
+            if valid:
+                return valid
+            if timed_out:
+                if last_error:
+                    raise last_error
+                raise ValueError("QR decode timed out. Send a clearer crop of the QR code.")
+
+    # 3) Last fallback: try curved decode on the resized/original image, still bounded.
+    for attempt in quick_images[:2]:
+        valid, last_error, timed_out = _decode_attempt_and_validate(
+            detector,
+            attempt,
+            started_at=started_at,
+            timeout_seconds=timeout_seconds,
+            include_heavy=True,
+            last_error=last_error,
+        )
+        if valid:
+            return valid
+        if timed_out:
             break
-        if not data:
-            continue
-        try:
-            return validate_qr_data(data)
-        except ValueError as exc:
-            # A low-resolution decode can sometimes be incomplete or malformed.
-            # Keep trying larger/cleaner attempts before rejecting the QR.
-            last_error = exc
-            continue
 
     if last_error:
         raise last_error
@@ -7565,24 +7655,38 @@ async def send_offer_to_receivers(context: ContextTypes.DEFAULT_TYPE, public_id:
     if not row:
         return 0, 0
     text = build_offer_text(public_id, int(row["daily_no"]), _dec(row["sender_rate_usdt"]), _dec(row["receiver_rate_usdt"]), str(row["offer_expires_at"]))
-    sent = failed = 0
     receivers = online_receivers()
-    for receiver in receivers:
-        try:
-            msg = await context.bot.send_message(
-                chat_id=int(receiver["chat_id"]),
-                text=text,
-                reply_markup=build_offer_keyboard(public_id),
-                protect_content=PROTECT_CONTENT,
-            )
-            record_offer_notification(public_id, int(receiver["chat_id"]), msg.message_id)
-            sent += 1
-            await asyncio.sleep(0.03)
-        except TelegramError as exc:
-            logger.warning("Could not send offer %s to receiver %s: %s", public_id, receiver["chat_id"], exc)
-            failed += 1
-    return sent, failed
+    if not receivers:
+        return 0, 0
 
+    # Send offers concurrently. Sequential sends can waste several seconds when many
+    # receivers are online, and mandate QRs are time-limited.
+    semaphore = asyncio.Semaphore(25)
+
+    async def send_one(receiver) -> tuple[int, int | None]:
+        receiver_chat_id = int(receiver["chat_id"])
+        async with semaphore:
+            try:
+                msg = await context.bot.send_message(
+                    chat_id=receiver_chat_id,
+                    text=text,
+                    reply_markup=build_offer_keyboard(public_id),
+                    protect_content=PROTECT_CONTENT,
+                )
+                return receiver_chat_id, msg.message_id
+            except TelegramError as exc:
+                logger.warning("Could not send offer %s to receiver %s: %s", public_id, receiver_chat_id, exc)
+                return receiver_chat_id, None
+
+    results = await asyncio.gather(*(send_one(receiver) for receiver in receivers))
+    sent = failed = 0
+    for receiver_chat_id, message_id in results:
+        if message_id is None:
+            failed += 1
+            continue
+        record_offer_notification(public_id, receiver_chat_id, message_id)
+        sent += 1
+    return sent, failed
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     observe_telegram_profile(update.effective_user)
