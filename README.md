@@ -71,7 +71,8 @@ Admin features:
 - Payments: BEP20/Polygon wallet addresses, Binance Pay ID/name, manual TxHash tolerances, minimum wallet top-up, and deposit review.
 - Payout Requests: review receiver withdrawal requests with red sidebar count. Receiver withdrawals are blocked until available balance reaches the admin-set minimum payout amount.
 - Disputes: review `/dispute` submissions with clear statuses: Open, Under Review, Resolved, and Rejected. Resolve/reject actions ask for the message to send to the disputer.
-- Pending QR: view open/claimed QR offers and statuses. Clicking a QR ID opens its admin detail page with QR image, users, rates, timestamps, and linked disputes.
+- Pending QR: view open/claimed QR offers and statuses. Clicking a QR ID opens its admin detail page with QR image, users, rates, timestamps, linked disputes, and admin status override.
+- QR status override: admin can change any order to Done or Failed; both sender and receiver are notified, receiver earnings are deducted when a completed order is reversed, and the sender charge is added back/released automatically.
 - Stats: marketplace statistics.
 - Broadcast: send web-panel broadcasts to users.
 - Secret Settings: web login credentials, payment verification API keys/secrets, QR expire time, bot timing, and receiver withdrawal minimum payout.
@@ -98,6 +99,7 @@ QR charging flow:
 - On QR offer creation, the sender rate is reserved from the sender wallet.
 - If the offer expires or the receiver marks Failed, the reserve is released.
 - If the receiver marks Done, the sender is charged and the receiver earning is added.
+- If admin changes a completed order back to Failed, that order's receiver earning is deducted, the sender charge is added back to the sender wallet, and both parties get a Telegram notification.
 
 ## Required environment variables
 
@@ -220,3 +222,11 @@ The automatic payment watcher now checks newest active deposits first, runs a sm
 
 - The Pending QRs page now includes an **Expire** action for every pending QR. Admin expiry works for both open offers and already-claimed pending QRs, marks the QR expired/failed, removes receiver action buttons where possible, and releases the sender reserve through the normal failed/expired settlement path.
 - Wallet top-up completed confirmations now show the credited amount with 2 decimals, for example `$1.00 USDT`, instead of 4 decimals.
+
+## Admin QR status override
+
+- The QR detail page now includes **Change order status** for every order.
+- Admin can switch an order to **Done** or **Failed** even after it was already completed/failed.
+- When a completed order is changed to Failed, the receiver earning for that order is deducted and the sender charge is added back to the sender wallet.
+- When a failed order is changed to Done, the sender is charged again and the receiver earning is credited again.
+- Sender and receiver both receive Telegram notifications for the admin status change.

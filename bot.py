@@ -1920,6 +1920,257 @@ def settle_photo_wallets(public_id: str, status: str) -> None:
         conn.commit()
 
 
+def admin_override_photo_status(public_id: str, new_status: str, *, failure_reason: str | None = None, status_by: int | None = None) -> tuple[bool, str, dict | None]:
+    """Change any QR order status from the admin panel and keep wallet balances in sync.
+
+    Supported admin transitions:
+    - pending -> done: charge the sender reserve and credit receiver earnings;
+    - pending -> failed: release the sender reserve;
+    - done -> failed: refund the sender and deduct that order's receiver earning;
+    - failed -> done: charge the sender again and credit the receiver.
+    """
+    public_id = str(public_id or "").strip()
+    target_status = str(new_status or "").strip().lower()
+    if not public_id:
+        return False, "QR ID is missing.", None
+    if target_status not in {"done", "failed"}:
+        return False, "Admin can change an order only to Done or Failed.", None
+
+    clean_reason = clean_failure_reason_text(failure_reason or "Changed by admin") if target_status == "failed" else None
+    admin_chat_id = int(status_by or 0)
+
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM photos WHERE public_id = ?", (public_id,)).fetchone()
+        if not row:
+            conn.rollback()
+            return False, "QR order not found.", None
+
+        old_status = str(row["status"] or "pending").strip().lower()
+        if old_status == target_status:
+            conn.rollback()
+            return False, f"QR order is already marked {target_status.upper()}.", {"row_before": row, "row_after": row, "old_status": old_status, "new_status": target_status}
+        if old_status not in {"pending", "done", "failed"}:
+            conn.rollback()
+            return False, f"Cannot change unsupported current status: {old_status}.", None
+
+        sender_chat_id = int(row["sender_chat_id"])
+        receiver_chat_id = int(row["receiver_chat_id"] or 0)
+        sender_rate = _dec(row["sender_rate_usdt"])
+        receiver_rate = _dec(row["receiver_rate_usdt"])
+        charged_prev = _dec(row["charged_usdt"])
+        earned_prev = _dec(row["earned_usdt"])
+        charge_amount = charged_prev if charged_prev > 0 else sender_rate
+        earn_amount = earned_prev if earned_prev > 0 else receiver_rate
+
+        if target_status == "done" and receiver_chat_id <= 0:
+            conn.rollback()
+            return False, "Cannot mark an unclaimed QR as Done because there is no receiver to credit.", None
+
+        now = now_iso()
+        _wallet_snapshot(conn, sender_chat_id)
+        if receiver_chat_id:
+            _wallet_snapshot(conn, receiver_chat_id)
+
+        sender_amount = Decimal("0")
+        receiver_amount = Decimal("0")
+        sender_effect = "none"
+        receiver_effect = "none"
+        sender_balance_after = Decimal("0")
+        receiver_balance_after = Decimal("0")
+
+        if old_status == "pending" and target_status == "done":
+            sender_wallet = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+            if _dec(sender_wallet["balance_usdt"]) < charge_amount:
+                conn.rollback()
+                return False, f"Sender wallet balance is too low to mark Done. Required: ${_money(charge_amount)} USDT.", None
+            reserve_release = min(_dec(sender_wallet["reserved_usdt"]), charge_amount)
+            conn.execute(
+                "UPDATE wallets SET reserved_usdt = MAX(0, reserved_usdt - ?), balance_usdt = balance_usdt - ?, updated_at = ? WHERE chat_id = ?",
+                (float(reserve_release), float(charge_amount), now, sender_chat_id),
+            )
+            updated_sender = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+            sender_balance_after = _dec(updated_sender["balance_usdt"])
+            sender_amount = -charge_amount
+            sender_effect = "charged"
+            conn.execute(
+                "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'admin_order_charge', ?, ?, ?, ?, ?)",
+                (sender_chat_id, -float(charge_amount), float(sender_balance_after), "Admin changed QR order to done", public_id, now),
+            )
+            if receiver_chat_id and earn_amount > 0:
+                conn.execute(
+                    "UPDATE wallets SET earned_usdt = earned_usdt + ?, updated_at = ? WHERE chat_id = ?",
+                    (float(earn_amount), now, receiver_chat_id),
+                )
+                updated_receiver = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (receiver_chat_id,)).fetchone()
+                receiver_balance_after = _dec(updated_receiver["earned_usdt"]) - _dec(updated_receiver["paid_usdt"])
+                receiver_amount = earn_amount
+                receiver_effect = "credited"
+                conn.execute(
+                    "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'admin_order_earning', ?, ?, ?, ?, ?)",
+                    (receiver_chat_id, float(earn_amount), float(receiver_balance_after), "Admin changed QR order to done", public_id, now),
+                )
+            charged_value = charge_amount
+            earned_value = earn_amount if receiver_chat_id else Decimal("0")
+
+        elif old_status == "pending" and target_status == "failed":
+            sender_wallet = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+            reserve_release = min(_dec(sender_wallet["reserved_usdt"]), charge_amount)
+            conn.execute(
+                "UPDATE wallets SET reserved_usdt = MAX(0, reserved_usdt - ?), updated_at = ? WHERE chat_id = ?",
+                (float(reserve_release), now, sender_chat_id),
+            )
+            updated_sender = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+            sender_balance_after = _dec(updated_sender["balance_usdt"]) - _dec(updated_sender["reserved_usdt"])
+            sender_amount = reserve_release
+            sender_effect = "reserve_released"
+            conn.execute(
+                "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'admin_order_release', ?, ?, ?, ?, ?)",
+                (sender_chat_id, float(reserve_release), float(sender_balance_after), "Admin changed QR order to failed", public_id, now),
+            )
+            charged_value = Decimal("0")
+            earned_value = Decimal("0")
+
+        elif old_status == "done" and target_status == "failed":
+            refund_amount = charge_amount
+            deduct_amount = earn_amount if receiver_chat_id else Decimal("0")
+            if receiver_chat_id and deduct_amount > 0:
+                receiver_wallet = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (receiver_chat_id,)).fetchone()
+                new_earned = _dec(receiver_wallet["earned_usdt"]) - deduct_amount
+                paid = _dec(receiver_wallet["paid_usdt"])
+                if new_earned < paid:
+                    conn.rollback()
+                    return False, (
+                        "Cannot deduct this receiver earning because it would go below already-paid payout amount. "
+                        "Adjust/review the receiver payout first."
+                    ), None
+            if refund_amount > 0:
+                conn.execute(
+                    "UPDATE wallets SET balance_usdt = balance_usdt + ?, updated_at = ? WHERE chat_id = ?",
+                    (float(refund_amount), now, sender_chat_id),
+                )
+                updated_sender = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+                sender_balance_after = _dec(updated_sender["balance_usdt"])
+                sender_amount = refund_amount
+                sender_effect = "refunded"
+                conn.execute(
+                    "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'admin_order_refund', ?, ?, ?, ?, ?)",
+                    (sender_chat_id, float(refund_amount), float(sender_balance_after), "Admin changed QR order from done to failed", public_id, now),
+                )
+            if receiver_chat_id and deduct_amount > 0:
+                conn.execute(
+                    "UPDATE wallets SET earned_usdt = earned_usdt - ?, updated_at = ? WHERE chat_id = ?",
+                    (float(deduct_amount), now, receiver_chat_id),
+                )
+                updated_receiver = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (receiver_chat_id,)).fetchone()
+                receiver_balance_after = _dec(updated_receiver["earned_usdt"]) - _dec(updated_receiver["paid_usdt"])
+                receiver_amount = -deduct_amount
+                receiver_effect = "deducted"
+                conn.execute(
+                    "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'admin_order_earning_reversal', ?, ?, ?, ?, ?)",
+                    (receiver_chat_id, -float(deduct_amount), float(receiver_balance_after), "Admin changed QR order from done to failed", public_id, now),
+                )
+            charged_value = Decimal("0")
+            earned_value = Decimal("0")
+
+        elif old_status == "failed" and target_status == "done":
+            sender_wallet = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+            available = _dec(sender_wallet["balance_usdt"]) - _dec(sender_wallet["reserved_usdt"])
+            if available < charge_amount:
+                conn.rollback()
+                return False, f"Sender available balance is too low to mark Done. Available: ${_money(available)} USDT, required: ${_money(charge_amount)} USDT.", None
+            if charge_amount > 0:
+                conn.execute(
+                    "UPDATE wallets SET balance_usdt = balance_usdt - ?, updated_at = ? WHERE chat_id = ?",
+                    (float(charge_amount), now, sender_chat_id),
+                )
+                updated_sender = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (sender_chat_id,)).fetchone()
+                sender_balance_after = _dec(updated_sender["balance_usdt"])
+                sender_amount = -charge_amount
+                sender_effect = "charged"
+                conn.execute(
+                    "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'admin_order_charge', ?, ?, ?, ?, ?)",
+                    (sender_chat_id, -float(charge_amount), float(sender_balance_after), "Admin changed QR order from failed to done", public_id, now),
+                )
+            if receiver_chat_id and earn_amount > 0:
+                conn.execute(
+                    "UPDATE wallets SET earned_usdt = earned_usdt + ?, updated_at = ? WHERE chat_id = ?",
+                    (float(earn_amount), now, receiver_chat_id),
+                )
+                updated_receiver = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (receiver_chat_id,)).fetchone()
+                receiver_balance_after = _dec(updated_receiver["earned_usdt"]) - _dec(updated_receiver["paid_usdt"])
+                receiver_amount = earn_amount
+                receiver_effect = "credited"
+                conn.execute(
+                    "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'admin_order_earning', ?, ?, ?, ?, ?)",
+                    (receiver_chat_id, float(earn_amount), float(receiver_balance_after), "Admin changed QR order from failed to done", public_id, now),
+                )
+            charged_value = charge_amount
+            earned_value = earn_amount if receiver_chat_id else Decimal("0")
+        else:
+            conn.rollback()
+            return False, f"Unsupported status change: {old_status.upper()} → {target_status.upper()}.", None
+
+        current_offer_state = str(row["offer_state"] or "claimed")
+        if target_status == "done" and receiver_chat_id:
+            new_offer_state = "claimed"
+        elif target_status == "failed" and old_status == "pending":
+            new_offer_state = "expired"
+        else:
+            new_offer_state = current_offer_state
+
+        conn.execute(
+            """
+            UPDATE photos
+            SET status = ?, status_by = ?, status_at = ?, failure_reason = ?,
+                offer_state = ?, charged_usdt = ?, earned_usdt = ?, settled_at = ?
+            WHERE public_id = ?
+            """,
+            (
+                target_status,
+                admin_chat_id,
+                now,
+                clean_reason,
+                new_offer_state,
+                float(charged_value),
+                float(earned_value),
+                now,
+                public_id,
+            ),
+        )
+        row_after = conn.execute("SELECT * FROM photos WHERE public_id = ?", (public_id,)).fetchone()
+        conn.commit()
+
+    msg = f"QR order {public_id} changed from {old_status.upper()} to {target_status.upper()}."
+    if sender_effect == "refunded":
+        msg += f" Sender refunded ${_money(abs(sender_amount))} USDT."
+    elif sender_effect == "reserve_released":
+        msg += f" Sender reserve released ${_money(abs(sender_amount))} USDT."
+    elif sender_effect == "charged":
+        msg += f" Sender charged ${_money(abs(sender_amount))} USDT."
+    if receiver_effect == "deducted":
+        msg += f" Receiver earnings deducted ${_money(abs(receiver_amount))} USDT."
+    elif receiver_effect == "credited":
+        msg += f" Receiver credited ${_money(abs(receiver_amount))} USDT."
+
+    return True, msg, {
+        "public_id": public_id,
+        "row_before": row,
+        "row_after": row_after,
+        "old_status": old_status,
+        "new_status": target_status,
+        "failure_reason": clean_reason,
+        "sender_chat_id": sender_chat_id,
+        "receiver_chat_id": receiver_chat_id,
+        "sender_amount": sender_amount,
+        "receiver_amount": receiver_amount,
+        "sender_effect": sender_effect,
+        "receiver_effect": receiver_effect,
+        "sender_balance_after": sender_balance_after,
+        "receiver_balance_after": receiver_balance_after,
+    }
+
+
 def manual_adjust_wallet(chat_id: int, amount: Decimal, target: str, note: str) -> dict:
     """Apply an admin wallet/earnings adjustment and return the updated totals.
 
@@ -8710,6 +8961,115 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
             pass
 
 
+async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]:
+    """Notify sender/receiver and update Telegram QR captions after an admin status override."""
+    row = result.get("row_after")
+    if row is None:
+        return 0, 0
+    public_id = str(result.get("public_id") or row["public_id"])
+    new_status = str(result.get("new_status") or row["status"]).lower()
+    old_status = str(result.get("old_status") or "").lower()
+    failure_reason = result.get("failure_reason")
+    sender_chat_id = int(result.get("sender_chat_id") or row["sender_chat_id"])
+    receiver_chat_id = int(result.get("receiver_chat_id") or row["receiver_chat_id"] or 0)
+    sender_amount = _dec(result.get("sender_amount"))
+    receiver_amount = _dec(result.get("receiver_amount"))
+    sender_effect = str(result.get("sender_effect") or "none")
+    receiver_effect = str(result.get("receiver_effect") or "none")
+
+    photo = row_to_photo(row)
+    caption = build_status_caption(photo, new_status, failure_reason=failure_reason) if photo else f"Order {public_id}: {new_status.upper()}"
+    caption += "\n🛠 Changed by admin."
+    if sender_effect == "refunded":
+        caption += f"\n💳 Sender refunded: ${_money(abs(sender_amount))} USDT."
+    elif sender_effect == "reserve_released":
+        caption += f"\n💳 Sender reserve released: ${_money(abs(sender_amount))} USDT."
+    elif sender_effect == "charged":
+        caption += f"\n💳 Sender charged: ${_money(abs(sender_amount))} USDT."
+    if receiver_effect == "deducted":
+        caption += f"\n💰 Receiver earnings deducted: ${_money(abs(receiver_amount))} USDT."
+    elif receiver_effect == "credited":
+        caption += f"\n💰 Receiver credited: ${_money(abs(receiver_amount))} USDT."
+
+    # Open offer messages are text messages, not photo captions. Disable/replace them on failed overrides.
+    if new_status == "failed":
+        offer_text = (
+            "❌ QR order marked FAILED by admin.\n"
+            f"🆔 Order ID: {public_id}\n"
+            "This QR can no longer be accepted or completed."
+        )
+        for note in offer_notifications(public_id):
+            try:
+                await bot.edit_message_text(
+                    chat_id=int(note["receiver_chat_id"]),
+                    message_id=int(note["message_id"]),
+                    text=offer_text,
+                )
+                set_offer_notification_state(public_id, int(note["receiver_chat_id"]), "expired")
+                await asyncio.sleep(0.02)
+            except TelegramError:
+                pass
+
+    for chat_id, message_id, label in (
+        (sender_chat_id, int(row["sender_message_id"] or 0), "sender"),
+        (receiver_chat_id, int(row["receiver_message_id"] or 0), "receiver"),
+    ):
+        if not chat_id or not message_id:
+            continue
+        try:
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=caption,
+                reply_markup=None,
+            )
+        except TelegramError as exc:
+            logger.warning("Could not edit %s caption after admin status change for %s: %s", label, public_id, exc)
+
+    sent = failed = 0
+    status_line = "✅ DONE" if new_status == "done" else "❌ FAILED"
+    sender_lines = [
+        "🛠 QR order status changed by admin",
+        f"🆔 Order ID: {public_id}",
+        f"Status: {old_status.upper()} → {status_line}",
+    ]
+    if sender_effect == "refunded":
+        sender_lines.append(f"💳 ${_money(abs(sender_amount))} USDT has been added back to your wallet balance.")
+    elif sender_effect == "reserve_released":
+        sender_lines.append(f"💳 ${_money(abs(sender_amount))} USDT reserve has been released back to your available balance.")
+    elif sender_effect == "charged":
+        sender_lines.append(f"💳 ${_money(abs(sender_amount))} USDT has been deducted from your wallet balance.")
+    sender_lines.append("Use /wallet to view your balance.")
+    try:
+        await bot.send_message(chat_id=sender_chat_id, text="\n".join(sender_lines), protect_content=PROTECT_CONTENT)
+        sent += 1
+    except TelegramError as exc:
+        logger.warning("Could not notify sender %s after admin status change for %s: %s", sender_chat_id, public_id, exc)
+        failed += 1
+
+    if receiver_chat_id:
+        receiver_lines = [
+            "🛠 QR order status changed by admin",
+            f"🆔 Order ID: {public_id}",
+            f"Status: {old_status.upper()} → {status_line}",
+        ]
+        if receiver_effect == "deducted":
+            receiver_lines.append(f"💰 ${_money(abs(receiver_amount))} USDT has been deducted from your earnings for this order.")
+        elif receiver_effect == "credited":
+            receiver_lines.append(f"💰 ${_money(abs(receiver_amount))} USDT has been credited to your earnings for this order.")
+        else:
+            receiver_lines.append("No receiver earnings change was needed for this order.")
+        receiver_lines.append("Use /earnings to view your balance.")
+        try:
+            await bot.send_message(chat_id=receiver_chat_id, text="\n".join(receiver_lines), protect_content=PROTECT_CONTENT)
+            sent += 1
+        except TelegramError as exc:
+            logger.warning("Could not notify receiver %s after admin status change for %s: %s", receiver_chat_id, public_id, exc)
+            failed += 1
+
+    return sent, failed
+
+
 async def marketplace_watcher(application: Application) -> None:
     while True:
         try:
@@ -9123,6 +9483,30 @@ def status_pill(status: str | None) -> str:
     if value == "failed":
         return '<span class="status-pill status-failed">❌ Failed</span>'
     return '<span class="status-pill status-pending">⏳ Pending</span>'
+
+
+
+def admin_qr_status_override_form(public_id: str, current_status: str | None) -> str:
+    current = str(current_status or "pending").strip().lower()
+    options = []
+    for value, label in (("done", "✅ Done"), ("failed", "❌ Failed")):
+        selected = " selected" if value == current else ""
+        options.append(f'<option value="{esc(value)}"{selected}>{esc(label)}</option>')
+    return f'''
+    <div class="admin-status-override">
+      <h3>🛠 Change order status</h3>
+      <p class="muted small">Admin can change this order to Done or Failed. Wallet balances are adjusted automatically and both parties are notified.</p>
+      <form method="post" action="/admin/qrs/{esc(public_id)}/status"
+            data-confirm-title="Change order status?" data-confirm-button="Update status" data-confirm-class="danger"
+            data-confirm-message="This will adjust sender/receiver balances for this order and notify both parties.">
+        <div class="row">
+          <div><label>New status</label><select name="status">{''.join(options)}</select></div>
+          <div><label>Failure/admin note</label><input name="failure_reason" placeholder="optional, used when marking failed"></div>
+        </div>
+        <button type="submit">Update order status</button>
+      </form>
+    </div>
+    '''
 
 
 def deposit_status_pill(status: str | None) -> str:
@@ -9783,6 +10167,7 @@ async def admin_qr_detail(request: Request, public_id: str):
             'data-confirm-message="Sender reserve will be released and this QR cannot be completed.">'
             '<button class="danger" type="submit">Expire pending QR</button></form>'
         )
+    status_override_form = admin_qr_status_override_form(public_id, row["status"])
     body = f'''
     <div class="card">
       <h2>🆔 QR Detail</h2>
@@ -9796,6 +10181,7 @@ async def admin_qr_detail(request: Request, public_id: str):
           <p><strong>Completed:</strong> {esc(completed_value(row))}</p>
           <p><strong>Processing:</strong> {esc(row["processing_ms"] or 0)} ms</p>
           {expire_form}
+          {status_override_form}
         </div>
         <div>
           <p><strong>Sender:</strong><br>{sender_html}</p>
@@ -9826,6 +10212,23 @@ async def admin_qr_detail(request: Request, public_id: str):
         body += '</table></div>'
     body += '</div>'
     return render_page("QR Detail", body, request)
+
+
+@web_app.post("/admin/qrs/{public_id}/status")
+async def admin_qr_status_override(request: Request, public_id: str):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    new_status = str(form.get("status", "")).strip().lower()
+    failure_reason = str(form.get("failure_reason", "")).strip() or None
+    ok, msg, result = admin_override_photo_status(public_id, new_status, failure_reason=failure_reason, status_by=0)
+    if ok and result is not None and telegram_application is not None:
+        sent, failed = await notify_admin_order_status_change(telegram_application.bot, result)
+        msg += f" Notifications sent: {sent}, failed: {failed}."
+    elif ok:
+        msg += " Telegram bot is not ready, so notifications were not sent."
+    return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), msg)
 
 
 @web_app.get("/admin/payments/{ref_id}/proof-image")
