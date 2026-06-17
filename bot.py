@@ -1132,19 +1132,51 @@ def ensure_default_sender_user(chat_id: int) -> UserRow:
     return get_user(chat_id) or UserRow(chat_id=chat_id, role="sender", alias=None, active=True)
 
 
-def list_users(role: str | None = None, limit: int = 100) -> list[sqlite3.Row]:
+def list_users(
+    role: str | None = None,
+    limit: int = 100,
+    search: str | None = None,
+    active: bool | None = None,
+) -> list[sqlite3.Row]:
     with get_conn() as conn:
         base = """
             SELECT u.*, p.username, p.first_name, p.last_name, p.last_seen_at
             FROM users u
             LEFT JOIN telegram_profiles p ON p.chat_id = u.chat_id
         """
+        where: list[str] = []
+        params: list[object] = []
+
         if role in {"sender", "receiver"}:
-            return conn.execute(
-                base + " WHERE u.role = ? ORDER BY u.created_at DESC LIMIT ?",
-                (role, limit),
-            ).fetchall()
-        return conn.execute(base + " ORDER BY u.created_at DESC LIMIT ?", (limit,)).fetchall()
+            where.append("u.role = ?")
+            params.append(role)
+
+        if active is not None:
+            where.append("u.active = ?")
+            params.append(1 if active else 0)
+
+        q = (search or "").strip()
+        if q:
+            like = f"%{q.lower()}%"
+            where.append(
+                "("
+                "LOWER(CAST(u.chat_id AS TEXT)) LIKE ? OR "
+                "LOWER(COALESCE(u.alias, '')) LIKE ? OR "
+                "LOWER(COALESCE(u.role, '')) LIKE ? OR "
+                "LOWER(COALESCE(p.username, '')) LIKE ? OR "
+                "LOWER(COALESCE(p.first_name, '')) LIKE ? OR "
+                "LOWER(COALESCE(p.last_name, '')) LIKE ? OR "
+                "LOWER(COALESCE(p.first_name, '') || ' ' || COALESCE(p.last_name, '')) LIKE ?"
+                ")"
+            )
+            params.extend([like, like, like, like, like, like, like])
+
+        sql = base
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY u.created_at DESC LIMIT ?"
+        params.append(limit)
+        return conn.execute(sql, tuple(params)).fetchall()
 
 
 def get_admin_user_row(chat_id: int) -> sqlite3.Row | None:
@@ -1946,8 +1978,10 @@ def marketplace_status_text(for_chat_id: int | None = None) -> str:
             wallet = get_wallet(for_chat_id)
             rate = _dec(settings["sender_rate_usdt"])
             available = _dec(wallet["balance_usdt"]) - _dec(wallet["reserved_usdt"])
-            scans = "∞" if rate <= 0 else str(max(0, int(available // rate)))
-            text += f"\n💼 Your available balance: ${_money(available)} USDT\n🧾 Estimated scans available: {scans}\n"
+            text += f"\n💼 Your available balance: ${_money(available)} USDT\n"
+            if rate > 0:
+                scans = str(max(0, int(available // rate)))
+                text += f"🧾 Estimated scans available: {scans}\n"
         elif user and user.role == "receiver":
             presence = receiver_presence_row(for_chat_id)
             if presence and presence["online"]:
@@ -8650,6 +8684,50 @@ def completed_value(row: sqlite3.Row) -> str:
     return "—"
 
 
+def _parse_iso_dt(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value))
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo(BOT_TZ))
+    else:
+        dt = dt.astimezone(ZoneInfo(BOT_TZ))
+    return dt
+
+
+def duration_between(start_value: str | datetime | None, end_value: str | datetime | None) -> str:
+    start_dt = _parse_iso_dt(start_value)
+    end_dt = _parse_iso_dt(end_value)
+    if not start_dt or not end_dt:
+        return "—"
+    seconds = max(0, int((end_dt - start_dt).total_seconds()))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {sec}s" if sec else f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h" if hours else f"{days}d"
+
+
+def qr_duration_value(row: sqlite3.Row) -> str:
+    status = str(row["status"] or "pending").lower()
+    if status in {"done", "failed"} and row["status_at"]:
+        return duration_between(row["created_at"], row["status_at"])
+    if row["claimed_at"]:
+        return duration_between(row["created_at"], row["claimed_at"]) + " to claim"
+    return "—"
+
+
 def photo_no_html(row: sqlite3.Row) -> str:
     return f'📷 #{esc(row["daily_no"])}'
 
@@ -9309,35 +9387,79 @@ async def admin_users(request: Request):
     guard = admin_guard(request)
     if guard:
         return guard
-    users = list_users(limit=500)
+
+    q = str(request.query_params.get("q", "")).strip()
+    role_filter = str(request.query_params.get("role", "all")).strip().lower()
+    status_filter = str(request.query_params.get("status", "all")).strip().lower()
+
+    role = role_filter if role_filter in {"sender", "receiver"} else None
+    active = True if status_filter == "active" else False if status_filter == "disabled" else None
+
+    users = list_users(role=role, active=active, search=q, limit=10000 if q or role or active is not None else 500)
     paged_users, pager_html = paginate_items(users, request)
-    body = '''
-    <div class="card"><h2>👥 Users</h2>
-      <form method="post" action="/admin/users/add">
-        <div class="row">
-          <div><label>Role</label><select name="role"><option value="sender">Sender</option><option value="receiver">Receiver / Buyer</option></select></div>
-          <div><label>ID/Username</label><input name="identifier" required placeholder="123456789 or @username"></div>
-          <div><label>Admin alias</label><input name="alias" placeholder="Sender A / Buyer A"></div>
-        </div>
-        <button type="submit">➕ Add / update user</button>
-      </form>
-      <p class="muted small">New users who send /start are created as active senders automatically. Use this form to change a user to receiver or update their alias. Username lookup works after the user has sent /start or /myid to the bot at least once.</p>
-    </div>
-    <div class="card"><h3>Registered users</h3>
-    '''
+
+    def selected(value: str, current: str) -> str:
+        return " selected" if value == current else ""
+
+    body = (
+        '<div class="card"><h2>👥 Users</h2>'
+        '<form method="post" action="/admin/users/add">'
+        '<div class="row">'
+        '<div><label>Role</label><select name="role"><option value="sender">Sender</option><option value="receiver">Receiver / Buyer</option></select></div>'
+        '<div><label>ID/Username</label><input name="identifier" required placeholder="123456789 or @username"></div>'
+        '<div><label>Admin alias</label><input name="alias" placeholder="Sender A / Buyer A"></div>'
+        '</div>'
+        '<button type="submit">➕ Add / update user</button>'
+        '</form>'
+        '<p class="muted small">New users who send /start are created as active senders automatically. Use this form to change a user to receiver or update their alias. Username lookup works after the user has sent /start or /myid to the bot at least once.</p>'
+        '</div>'
+    )
+
+    body += (
+        '<div class="card"><h3>🔎 Search users</h3>'
+        '<form method="get" action="/admin/users">'
+        '<div class="row">'
+        f'<div><label>Search</label><input name="q" value="{esc(q)}" placeholder="ID, @username, name, alias, role"></div>'
+        '<div><label>Role</label><select name="role">'
+        f'<option value="all"{selected("all", role_filter)}>All roles</option>'
+        f'<option value="sender"{selected("sender", role_filter)}>Sender</option>'
+        f'<option value="receiver"{selected("receiver", role_filter)}>Receiver / Buyer</option>'
+        '</select></div>'
+        '<div><label>Status</label><select name="status">'
+        f'<option value="all"{selected("all", status_filter)}>All statuses</option>'
+        f'<option value="active"{selected("active", status_filter)}>Active only</option>'
+        f'<option value="disabled"{selected("disabled", status_filter)}>Disabled only</option>'
+        '</select></div>'
+        '</div>'
+        '<button type="submit">🔍 Search</button>'
+        '<a class="btn secondary" href="/admin/users">Clear</a>'
+        '</form>'
+        '<p class="muted small">Search matches Telegram ID, username, first name, last name, admin alias, and role.</p>'
+        '</div>'
+    )
+
+    body += '<div class="card"><h3>Registered users</h3>'
+    if q or role is not None or active is not None:
+        body += f'<p class="muted small">Showing {esc(len(users))} matching user(s).</p>'
+
     if not users:
-        body += '<p>No users yet. Ask users to send <code>/myid</code> to the bot, then add their ID/Username here.</p>'
+        if q or role is not None or active is not None:
+            body += '<p>No users matched your search/filter.</p>'
+        else:
+            body += '<p>No users yet. Ask users to send <code>/myid</code> to the bot, then add their ID/Username here.</p>'
     else:
-        body += '<div class="table-wrap"><table><tr><th>Role</th><th>ID/Username</th><th>Alias</th><th class="cell-center">Status</th><th class="cell-center">Actions</th></tr>'
+        body += '<div class="table-wrap"><table><tr><th>Role</th><th>ID/Username</th><th>Alias</th><th>Name</th><th class="cell-center">Status</th><th class="cell-center">Actions</th></tr>'
         for u in paged_users:
             next_state = 'off' if u['active'] else 'on'
             action_label = 'Disable' if u['active'] else 'Enable'
             btn_class = 'danger' if u['active'] else 'secondary'
+            full_name = " ".join([str(u["first_name"] or "").strip(), str(u["last_name"] or "").strip()]).strip()
             body += f'''
             <tr>
               <td>{esc(u['role'])}</td>
               <td>{user_link(u)}</td>
               <td>{esc(u['alias'] or '')}</td>
+              <td>{esc(full_name or '—')}</td>
               <td class="cell-center">{badge(bool(u['active']))}</td>
               <td class="cell-center"><form class="inline" method="post" action="/admin/users/active"><input type="hidden" name="chat_id" value="{esc(u['chat_id'])}"><input type="hidden" name="state" value="{next_state}"><button class="{btn_class}" type="submit">{action_label}</button></form></td>
             </tr>'''
@@ -9493,23 +9615,65 @@ async def admin_stats(request: Request):
         return guard
     body = stat_cards_html("Overall stats")
     with get_conn() as conn:
-        rows = conn.execute("""
+        state_rows = conn.execute("""
             SELECT offer_state, status, COUNT(*) AS n
             FROM photos
             GROUP BY offer_state, status
             ORDER BY offer_state, status
         """).fetchall()
-    body += '<div class="card"><h3>📡 Marketplace QR states</h3>'
-    if not rows:
+        qr_rows = conn.execute("""
+            SELECT *
+            FROM photos
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1000
+        """).fetchall()
+
+    body += '<div class="card"><h3>📋 QR order history</h3>'
+    body += '<p class="muted small">Detailed marketplace QR list with sender, receiver, status, created time, claim time, completed/failed time, and duration.</p>'
+    if not qr_rows:
+        body += '<p>No QR data yet.</p>'
+    else:
+        paged_qrs, qr_pager = paginate_items(list(qr_rows), request, key="orders_page")
+        body += '<div class="table-wrap"><table class="compact-table"><tr><th class="cell-center">Order ID</th><th class="photo-cell">QR</th><th>Sender</th><th>Receiver</th><th class="cell-center">Offer</th><th class="cell-center">Status</th><th class="created-cell">Created</th><th class="created-cell">Claimed</th><th class="completed-cell">Completed / Failed</th><th class="cell-center">Duration</th><th>Failure reason</th></tr>'
+        for row in paged_qrs:
+            sender = get_admin_user_row(int(row["sender_chat_id"]))
+            receiver_id = row["receiver_chat_id"]
+            receiver = get_admin_user_row(int(receiver_id)) if receiver_id is not None else None
+            sender_html = user_link(sender) if sender else esc(row["sender_chat_id"])
+            receiver_html = user_link(receiver) if receiver else (esc(receiver_id) if receiver_id is not None else "—")
+            offer_state = str(row["offer_state"] or "old").strip().lower()
+            claimed_value = display_datetime(row["claimed_at"]) if row["claimed_at"] else "—"
+            failure_reason = "—"
+            if str(row["status"] or "").lower() == "failed" and row["failure_reason"]:
+                failure_reason = esc(row["failure_reason"])
+            body += (
+                '<tr>'
+                f'<td class="cell-center">{qr_id_link(row["public_id"])}</td>'
+                f'<td class="photo-cell">{photo_no_html(row)}</td>'
+                f'<td>{sender_html}</td>'
+                f'<td>{receiver_html}</td>'
+                f'<td class="cell-center">{esc(offer_state)}</td>'
+                f'<td class="cell-center">{status_pill(row["status"])}</td>'
+                f'<td class="created-cell">{esc(display_datetime(row["created_at"]))}</td>'
+                f'<td class="created-cell">{esc(claimed_value)}</td>'
+                f'<td class="completed-cell">{esc(completed_value(row))}</td>'
+                f'<td class="cell-center">{esc(qr_duration_value(row))}</td>'
+                f'<td>{failure_reason}</td>'
+                '</tr>'
+            )
+        body += '</table></div>' + qr_pager
+    body += '</div>'
+
+    body += '<div class="card"><h3>📡 Marketplace QR summary</h3>'
+    if not state_rows:
         body += '<p>No QR data yet.</p>'
     else:
         body += '<div class="table-wrap"><table><tr><th>Offer state</th><th>QR status</th><th>Count</th></tr>'
-        for r in rows:
+        for r in state_rows:
             body += f'<tr><td>{esc(r["offer_state"] or "old")}</td><td>{esc(r["status"])}</td><td>{esc(r["n"])}</td></tr>'
         body += '</table></div>'
     body += '</div>'
     return render_page("Stats", body, request)
-
 
 @web_app.get("/admin/stats/pair/{sender_chat_id}", response_class=HTMLResponse)
 async def admin_stats_pair(request: Request, sender_chat_id: int):
