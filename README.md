@@ -230,3 +230,22 @@ The automatic payment watcher now checks newest active deposits first, runs a sm
 - When a completed order is changed to Failed, the receiver earning for that order is deducted and the sender charge is added back to the sender wallet.
 - When a failed order is changed to Done, the sender is charged again and the receiver earning is credited again.
 - Sender and receiver both receive Telegram notifications for the admin status change.
+
+## Language support
+
+The user-facing bot now supports English, Indonesian, Vietnamese, Chinese, and Spanish.
+
+- Default language is English.
+- On a user's first `/start`, the bot asks the user to choose a language.
+- On later `/start` commands, the bot opens the normal start menu.
+- Users can change language anytime with `/language` or the Language button in the start menu.
+- The admin panel remains English.
+- Admin-written content such as dispute replies and broadcast messages is not auto-translated.
+
+## Language-targeted broadcasts
+
+The admin Preset Messages page includes a **Broadcast by language** box. Choose the language and target role, then write the exact message to send. A Chinese broadcast is delivered only to Chinese-language users; English, Indonesian, Vietnamese, and Spanish work the same way. Users who never selected a language are treated as English.
+
+### Admin Broadcast Panel
+
+The admin sidebar includes a dedicated **📣 Broadcast** panel. Use it to send an admin-written message to all active users or only senders/receivers, filtered by selected bot language: English, Indonesian, Vietnamese, Chinese, or Spanish. Users without a saved language are treated as English. Broadcast text is sent exactly as typed and is not auto-translated.

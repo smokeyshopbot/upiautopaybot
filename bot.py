@@ -494,14 +494,319 @@ def support_display_text() -> str:
     return contact
 
 
-def support_keyboard(include_back: bool = True) -> InlineKeyboardMarkup | None:
+def support_keyboard(include_back: bool = True, chat_id: int | None = None) -> InlineKeyboardMarkup | None:
     rows: list[list[InlineKeyboardButton]] = []
     url = support_chat_url()
     if url:
-        rows.append([InlineKeyboardButton("💬 Open Support Chat", url=url)])
+        rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_open_support"), url=url)])
     if include_back:
-        rows.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:home")])
+        rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")])
     return InlineKeyboardMarkup(rows) if rows else None
+
+
+# -----------------------------
+# User language support
+# -----------------------------
+
+SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
+    "en": {"name": "English", "native": "English"},
+    "id": {"name": "Indonesian", "native": "Bahasa Indonesia"},
+    "vi": {"name": "Vietnamese", "native": "Tiếng Việt"},
+    "zh": {"name": "Chinese", "native": "中文"},
+    "es": {"name": "Spanish", "native": "Español"},
+}
+DEFAULT_LANGUAGE = "en"
+
+_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "private_only": "Please use this bot only in private chat.",
+        "choose_language": "🌐 Please choose your language.",
+        "language_saved": "✅ Language updated to English.",
+        "language_menu_hint": "You can change this anytime with /language.",
+        "btn_language_en": "English",
+        "btn_language_id": "Bahasa Indonesia",
+        "btn_language_vi": "Tiếng Việt",
+        "btn_language_zh": "中文",
+        "btn_language_es": "Español",
+        "btn_back": "⬅️ Back",
+        "btn_back_menu": "⬅️ Back to Menu",
+        "btn_open_support": "💬 Open Support Chat",
+        "btn_language": "🌐 Language",
+        "btn_commands": "📋 Commands",
+        "btn_support": "🛟 Support",
+        "btn_wallet": "👛 Wallet",
+        "btn_status": "📡 Status",
+        "btn_messages": "💬 Messages",
+        "btn_history": "📜 QR History",
+        "btn_stats": "📊 Stats",
+        "btn_dispute": "⚠️ Dispute",
+        "btn_earnings": "💰 Earnings",
+        "btn_pending_qr": "📥 Pending QR",
+        "btn_topup_wallet": "➕ Top-up Wallet",
+        "btn_wallet_history": "👛 Wallet History",
+        "btn_withdraw": "💸 Withdraw",
+        "registered_sender": "✅ You are registered as a <b>sender</b>.\n\n📤 Send a photo containing exactly one UPI AutoPay QR code.\n🧼 I will rebuild it as a clean QR and post it as an open offer to online receivers.\n\nUse the menu below for wallet, marketplace messages, QR history, disputes, stats, commands, language, and support.",
+        "registered_receiver": "✅ You are registered as a <b>receiver/buyer</b>.\n\n🟢 Go online when you are ready to receive QR offers.\n📥 Accepted QRs will appear here with Done/Failed buttons.\n\nUse the menu below for earnings, pending QRs, marketplace messages, QR history, disputes, stats, commands, language, and support.",
+        "not_registered_menu": "👋 You are not registered yet.\n\n🆔 Your chat ID: <code>{chat_id}</code>\n\n📩 Send this ID to support/admin to get access.\n\n👤 Support: {support}",
+        "commands_title": "📋 Available commands and usage",
+        "commands_role": "Role: {role}",
+        "commands_general": "General:",
+        "cmd_start": "• /start — open the main menu",
+        "cmd_commands": "• /commands — show this command list",
+        "cmd_language": "• /language — change your language",
+        "cmd_myid": "• /myid — show your Telegram chat ID and username",
+        "cmd_support": "• /support — show support contact and open-chat button",
+        "cmd_messages": "• /messages — send a preset marketplace broadcast",
+        "cmd_history": "• /history — show your QR history",
+        "cmd_dispute": "• /dispute — open a support dispute",
+        "cmd_stats": "• /stats — show your totals",
+        "commands_sender": "Sender:",
+        "cmd_send_qr": "• Send a QR photo — create a new open QR scan offer",
+        "cmd_status": "• /status — show marketplace receiver capacity",
+        "cmd_wallet": "• /wallet — show your wallet balance",
+        "cmd_loadwallet": "• /loadwallet — top up your wallet",
+        "commands_receiver": "Receiver:",
+        "cmd_on": "• /on LIMIT — go online, example: /on 25",
+        "cmd_off": "• /off — go offline",
+        "cmd_pending": "• /pending — show your claimed pending QRs",
+        "cmd_done": "• /done — mark the QR you replied to as done",
+        "cmd_failed": "• /failed — mark the QR you replied to as failed by selecting a reason",
+        "cmd_earnings": "• /earnings — show receiver earnings",
+        "cmd_withdraw": "• /withdraw — request payout",
+        "commands_after_activation": "After admin activates your account, this list will show only the commands for your role.",
+        "support_text": "🛟 Support\n\nContact: {support}\n\nUse the button below to open the support chat directly.",
+        "myid_text": "Your ID is:\n`{chat_id}`{suffix}",
+        "username_set": "\nUsername: @{username}",
+        "username_hidden": "\nUsername: not set / hidden",
+        "not_registered": "You are not registered yet.",
+        "not_registered_support": "You are not registered yet. Use Support below to request access.",
+        "only_active_receivers": "Only active receivers can use this.",
+        "only_active_receivers_on": "Only active receivers can use /on.",
+        "only_active_receivers_off": "Only active receivers can use /off.",
+        "on_usage": "Usage: /on LIMIT\nExample: /on 25",
+        "receiver_online": "🟢 You are online. Current limit: {limit} scans.",
+        "receiver_offline": "🔴 You are offline. New offers will stop until you use /on LIMIT again.",
+        "sender_status_only": "/status is only for senders. Use /pending for your QR tasks and /earnings for your balance.",
+        "sender_status_only_menu": "/status is only for senders. Use Pending QR and Earnings from the receiver menu.",
+        "notify_receiver_online": "🟢 A receiver is online now.\n📊 Current limit: {limit} scans.\n\nUse /status to see total live capacity.",
+        "notify_receiver_offline": "🔴 A receiver went offline.\nCheck /status before sending more QR codes.",
+        "no_pending_qrs": "No claimed pending QRs.",
+        "pending_header": "Your claimed pending QRs:\nTap an ID below to reopen that specific QR.\n",
+        "history_title": "📜 QR History",
+        "history_page": "<b>📜 QR History — Page {page}/{total_pages}</b>",
+        "history_showing": "Showing 10 QR logs per page, newest first.",
+        "history_empty": "No QR history yet.",
+        "qr_id": "QR ID",
+        "date_time": "Date/Time",
+        "photo_no": "Photo No",
+        "status": "Status",
+        "charged": "Charged",
+        "earned": "Earned",
+        "status_done": "✅ Done",
+        "status_failed": "❌ Failed",
+        "status_expired": "⌛ Expired",
+        "status_pending": "⏳ Pending",
+        "btn_prev": "⬅️ Previous",
+        "btn_next": "Next ➡️",
+        "marketplace_messages_title": "💬 Marketplace preset messages",
+        "marketplace_messages_text": "Choose a preset below. It will be sent to all active {target}.\nAny reply button they tap will come back only to you.",
+        "target_receivers": "receivers",
+        "target_senders": "senders",
+        "preset_private_only": "Please use preset messages only in private chat.",
+        "no_presets": "No preset messages are available for your role right now.",
+        "preset_menu_wrong_user": "This preset menu belongs to another account.",
+        "invalid_preset_button": "Invalid preset button.",
+        "preset_not_active": "This preset message is no longer active.",
+        "preset_not_for_role": "This preset is not available for your role.",
+        "no_active_recipients": "No active {role}s found right now.",
+        "could_not_send_any": "Could not send to any active {role} right now.",
+        "sent_failed": "Sent to {sent}. {failed} failed.",
+        "sent_ok": "Sent ✅",
+        "already_answered_closed": "✅ Already answered.\nThis marketplace message is closed.",
+        "invalid_reply_button": "Invalid reply button.",
+        "reply_no_longer_available": "This preset reply is no longer available.",
+        "reply_not_for_account": "This reply button is not for your account.",
+        "reply_mismatch": "This reply does not match the original message.",
+        "reply_not_for_role": "This reply is not available for your role.",
+        "already_answered_other": "Already answered by someone else.",
+        "marketplace_msg_unavailable": "This marketplace message is no longer available.",
+        "reply_saved_notify_failed": "Reply saved, but the sender could not be notified right now.",
+        "reply_sent": "Reply sent ✅",
+        "receiver_earnings_title": "💰 *Receiver earnings*",
+        "total_earned": "Total earned",
+        "paid": "Paid",
+        "requested": "Requested",
+        "available_withdraw": "Available to withdraw",
+        "wallet_title": "👛 *Your Wallet*",
+        "usdt_balance": "💵 USDT Balance",
+        "reserved": "🔒 Reserved",
+        "available": "✅ Available",
+        "only_active_senders_wallet": "Only active senders can use /wallet.",
+        "only_active_senders_load": "Only active senders can load wallet.",
+        "only_senders_load": "Only senders can load wallet.",
+        "loadwallet_hint": "Use /loadwallet to top up your wallet.",
+        "amount_gt_zero": "Amount must be greater than 0.",
+        "could_not_create_deposit": "Could not create deposit: {error}",
+        "topup_no_methods": "👛 *Top-up Wallet*\n\n⚠️ No top-up payment methods are configured right now. Please contact support.",
+        "topup_choose": "👛 *Top-up Wallet*\n\nChoose how you want to add funds:",
+        "only_receivers_pending": "Only receivers have pending QR tasks.",
+        "only_senders_status": "Only senders can use this.",
+    },
+    "id": {
+        "private_only": "Silakan gunakan bot ini hanya di chat pribadi.",
+        "choose_language": "🌐 Silakan pilih bahasa Anda.",
+        "language_saved": "✅ Bahasa diperbarui ke Bahasa Indonesia.",
+        "language_menu_hint": "Anda dapat mengubahnya kapan saja dengan /language.",
+        "btn_open_support": "💬 Buka Chat Dukungan", "btn_back": "⬅️ Kembali", "btn_back_menu": "⬅️ Kembali ke Menu", "btn_language": "🌐 Bahasa",
+        "btn_commands": "📋 Perintah", "btn_support": "🛟 Dukungan", "btn_wallet": "👛 Dompet", "btn_status": "📡 Status", "btn_messages": "💬 Pesan", "btn_history": "📜 Riwayat QR", "btn_stats": "📊 Statistik", "btn_dispute": "⚠️ Sengketa", "btn_earnings": "💰 Penghasilan", "btn_pending_qr": "📥 QR Tertunda", "btn_topup_wallet": "➕ Isi Saldo Dompet", "btn_wallet_history": "👛 Riwayat Dompet", "btn_withdraw": "💸 Tarik Dana",
+        "registered_sender": "✅ Anda terdaftar sebagai <b>pengirim</b>.\n\n📤 Kirim foto yang berisi tepat satu kode QR UPI AutoPay.\n🧼 Saya akan membuat ulang QR itu menjadi QR yang bersih dan menawarkannya secara terbuka kepada penerima yang online.\n\nGunakan menu di bawah untuk dompet, pesan marketplace, riwayat QR, sengketa, statistik, perintah, bahasa, dan dukungan.",
+        "registered_receiver": "✅ Anda terdaftar sebagai <b>penerima/pembeli</b>.\n\n🟢 Aktifkan status online saat Anda siap menerima penawaran QR.\n📥 QR yang diterima akan muncul di sini dengan tombol Done/Failed.\n\nGunakan menu di bawah untuk penghasilan, QR tertunda, pesan marketplace, riwayat QR, sengketa, statistik, perintah, bahasa, dan dukungan.",
+        "not_registered_menu": "👋 Anda belum terdaftar.\n\n🆔 ID chat Anda: <code>{chat_id}</code>\n\n📩 Kirim ID ini ke dukungan/admin untuk mendapatkan akses.\n\n👤 Dukungan: {support}",
+        "commands_title": "📋 Perintah yang tersedia dan cara penggunaan", "commands_role": "Peran: {role}", "commands_general": "Umum:", "cmd_start": "• /start — buka menu utama", "cmd_commands": "• /commands — tampilkan daftar perintah ini", "cmd_language": "• /language — ubah bahasa Anda", "cmd_myid": "• /myid — tampilkan ID chat Telegram dan username Anda", "cmd_support": "• /support — tampilkan kontak dukungan dan tombol buka chat", "cmd_messages": "• /messages — kirim broadcast marketplace preset", "cmd_history": "• /history — tampilkan riwayat QR Anda", "cmd_dispute": "• /dispute — buka sengketa dukungan", "cmd_stats": "• /stats — tampilkan total Anda", "commands_sender": "Pengirim:", "cmd_send_qr": "• Kirim foto QR — buat penawaran scan QR terbuka baru", "cmd_status": "• /status — tampilkan kapasitas penerima marketplace", "cmd_wallet": "• /wallet — tampilkan saldo dompet Anda", "cmd_loadwallet": "• /loadwallet — isi saldo dompet Anda", "commands_receiver": "Penerima:", "cmd_on": "• /on LIMIT — online, contoh: /on 25", "cmd_off": "• /off — offline", "cmd_pending": "• /pending — tampilkan QR tertunda yang sudah Anda klaim", "cmd_done": "• /done — tandai QR yang Anda balas sebagai selesai", "cmd_failed": "• /failed — tandai QR yang Anda balas sebagai gagal dengan memilih alasan", "cmd_earnings": "• /earnings — tampilkan penghasilan penerima", "cmd_withdraw": "• /withdraw — ajukan penarikan", "commands_after_activation": "Setelah admin mengaktifkan akun Anda, daftar ini hanya akan menampilkan perintah sesuai peran Anda.",
+        "support_text": "🛟 Dukungan\n\nKontak: {support}\n\nGunakan tombol di bawah untuk membuka chat dukungan secara langsung.", "username_hidden": "\nUsername: tidak disetel / disembunyikan", "not_registered": "Anda belum terdaftar.", "not_registered_support": "Anda belum terdaftar. Gunakan Dukungan di bawah untuk meminta akses.", "only_active_receivers": "Hanya penerima aktif yang dapat menggunakan ini.", "only_active_receivers_on": "Hanya penerima aktif yang dapat menggunakan /on.", "only_active_receivers_off": "Hanya penerima aktif yang dapat menggunakan /off.", "on_usage": "Penggunaan: /on LIMIT\nContoh: /on 25", "receiver_online": "🟢 Anda online. Limit saat ini: {limit} scan.", "receiver_offline": "🔴 Anda offline. Penawaran baru akan berhenti sampai Anda menggunakan /on LIMIT lagi.", "sender_status_only": "/status hanya untuk pengirim. Gunakan /pending untuk tugas QR Anda dan /earnings untuk saldo Anda.", "sender_status_only_menu": "/status hanya untuk pengirim. Gunakan QR Tertunda dan Penghasilan dari menu penerima.", "notify_receiver_online": "🟢 Ada penerima yang online sekarang.\n📊 Limit saat ini: {limit} scan.\n\nGunakan /status untuk melihat total kapasitas aktif.", "notify_receiver_offline": "🔴 Seorang penerima offline.\nSilakan cek /status sebelum mengirim QR lagi.",
+        "no_pending_qrs": "Tidak ada QR tertunda yang diklaim.", "pending_header": "QR tertunda yang Anda klaim:\nKetuk ID di bawah untuk membuka kembali QR tertentu.\n", "history_title": "📜 Riwayat QR", "history_page": "<b>📜 Riwayat QR — Halaman {page}/{total_pages}</b>", "history_showing": "Menampilkan 10 log QR per halaman, terbaru terlebih dahulu.", "history_empty": "Belum ada riwayat QR.", "qr_id": "ID QR", "date_time": "Tanggal/Waktu", "photo_no": "No. Foto", "status": "Status", "charged": "Ditagih", "earned": "Diperoleh", "status_done": "✅ Selesai", "status_failed": "❌ Gagal", "status_expired": "⌛ Kedaluwarsa", "status_pending": "⏳ Tertunda", "btn_prev": "⬅️ Sebelumnya", "btn_next": "Berikutnya ➡️",
+        "marketplace_messages_title": "💬 Pesan preset marketplace", "marketplace_messages_text": "Pilih preset di bawah. Pesan akan dikirim ke semua {target} aktif.\nTombol balasan yang mereka ketuk hanya akan kembali kepada Anda.", "target_receivers": "penerima", "target_senders": "pengirim", "preset_private_only": "Silakan gunakan pesan preset hanya di chat pribadi.", "no_presets": "Tidak ada pesan preset yang tersedia untuk peran Anda saat ini.", "preset_menu_wrong_user": "Menu preset ini milik akun lain.", "invalid_preset_button": "Tombol preset tidak valid.", "preset_not_active": "Pesan preset ini tidak aktif lagi.", "preset_not_for_role": "Preset ini tidak tersedia untuk peran Anda.", "no_active_recipients": "Tidak ada {role} aktif saat ini.", "could_not_send_any": "Tidak dapat mengirim ke {role} aktif saat ini.", "sent_failed": "Terkirim ke {sent}. {failed} gagal.", "sent_ok": "Terkirim ✅", "already_answered_closed": "✅ Sudah dijawab.\nPesan marketplace ini ditutup.", "invalid_reply_button": "Tombol balasan tidak valid.", "reply_no_longer_available": "Balasan preset ini tidak tersedia lagi.", "reply_not_for_account": "Tombol balasan ini bukan untuk akun Anda.", "reply_mismatch": "Balasan ini tidak cocok dengan pesan asli.", "reply_not_for_role": "Balasan ini tidak tersedia untuk peran Anda.", "already_answered_other": "Sudah dijawab oleh orang lain.", "marketplace_msg_unavailable": "Pesan marketplace ini tidak tersedia lagi.", "reply_saved_notify_failed": "Balasan disimpan, tetapi pengirim tidak dapat diberi tahu sekarang.", "reply_sent": "Balasan terkirim ✅",
+        "receiver_earnings_title": "💰 *Penghasilan penerima*", "total_earned": "Total diperoleh", "paid": "Dibayar", "requested": "Diminta", "available_withdraw": "Tersedia untuk ditarik", "wallet_title": "👛 *Dompet Anda*", "usdt_balance": "💵 Saldo USDT", "reserved": "🔒 Direservasi", "available": "✅ Tersedia", "only_active_senders_wallet": "Hanya pengirim aktif yang dapat menggunakan /wallet.", "only_active_senders_load": "Hanya pengirim aktif yang dapat mengisi saldo dompet.", "only_senders_load": "Hanya pengirim yang dapat mengisi saldo dompet.", "loadwallet_hint": "Gunakan /loadwallet untuk mengisi saldo dompet Anda.", "amount_gt_zero": "Jumlah harus lebih besar dari 0.", "could_not_create_deposit": "Tidak dapat membuat deposit: {error}", "topup_no_methods": "👛 *Isi Saldo Dompet*\n\n⚠️ Belum ada metode pembayaran isi saldo yang dikonfigurasi. Silakan hubungi dukungan.", "topup_choose": "👛 *Isi Saldo Dompet*\n\nPilih cara menambahkan dana:", "only_receivers_pending": "Hanya penerima yang memiliki tugas QR tertunda.", "only_senders_status": "Hanya pengirim yang dapat menggunakan ini."
+    },
+    "vi": {
+        "private_only": "Vui lòng chỉ sử dụng bot này trong cuộc trò chuyện riêng.", "choose_language": "🌐 Vui lòng chọn ngôn ngữ của bạn.", "language_saved": "✅ Đã đổi ngôn ngữ sang Tiếng Việt.", "language_menu_hint": "Bạn có thể thay đổi bất cứ lúc nào bằng /language.", "btn_open_support": "💬 Mở chat hỗ trợ", "btn_back": "⬅️ Quay lại", "btn_back_menu": "⬅️ Quay lại Menu", "btn_language": "🌐 Ngôn ngữ", "btn_commands": "📋 Lệnh", "btn_support": "🛟 Hỗ trợ", "btn_wallet": "👛 Ví", "btn_status": "📡 Trạng thái", "btn_messages": "💬 Tin nhắn", "btn_history": "📜 Lịch sử QR", "btn_stats": "📊 Thống kê", "btn_dispute": "⚠️ Khiếu nại", "btn_earnings": "💰 Thu nhập", "btn_pending_qr": "📥 QR đang chờ", "btn_topup_wallet": "➕ Nạp ví", "btn_wallet_history": "👛 Lịch sử ví", "btn_withdraw": "💸 Rút tiền",
+        "registered_sender": "✅ Bạn đã được đăng ký là <b>người gửi</b>.\n\n📤 Gửi ảnh chứa đúng một mã QR UPI AutoPay.\n🧼 Tôi sẽ tạo lại mã QR sạch và đăng nó dưới dạng lời mời mở cho các người nhận đang online.\n\nDùng menu bên dưới cho ví, tin nhắn marketplace, lịch sử QR, khiếu nại, thống kê, lệnh, ngôn ngữ và hỗ trợ.", "registered_receiver": "✅ Bạn đã được đăng ký là <b>người nhận/người mua</b>.\n\n🟢 Hãy bật online khi bạn sẵn sàng nhận các lời mời QR.\n📥 QR đã nhận sẽ xuất hiện ở đây với các nút Done/Failed.\n\nDùng menu bên dưới cho thu nhập, QR đang chờ, tin nhắn marketplace, lịch sử QR, khiếu nại, thống kê, lệnh, ngôn ngữ và hỗ trợ.", "not_registered_menu": "👋 Bạn chưa được đăng ký.\n\n🆔 ID chat của bạn: <code>{chat_id}</code>\n\n📩 Gửi ID này cho hỗ trợ/admin để được cấp quyền truy cập.\n\n👤 Hỗ trợ: {support}",
+        "commands_title": "📋 Các lệnh có sẵn và cách dùng", "commands_role": "Vai trò: {role}", "commands_general": "Chung:", "cmd_start": "• /start — mở menu chính", "cmd_commands": "• /commands — hiển thị danh sách lệnh", "cmd_language": "• /language — đổi ngôn ngữ", "cmd_myid": "• /myid — hiển thị ID chat Telegram và username", "cmd_support": "• /support — hiển thị liên hệ hỗ trợ và nút mở chat", "cmd_messages": "• /messages — gửi broadcast marketplace preset", "cmd_history": "• /history — hiển thị lịch sử QR", "cmd_dispute": "• /dispute — mở khiếu nại hỗ trợ", "cmd_stats": "• /stats — hiển thị tổng của bạn", "commands_sender": "Người gửi:", "cmd_send_qr": "• Gửi ảnh QR — tạo lời mời quét QR mở mới", "cmd_status": "• /status — hiển thị sức chứa người nhận trên marketplace", "cmd_wallet": "• /wallet — hiển thị số dư ví", "cmd_loadwallet": "• /loadwallet — nạp ví", "commands_receiver": "Người nhận:", "cmd_on": "• /on LIMIT — bật online, ví dụ: /on 25", "cmd_off": "• /off — tắt online", "cmd_pending": "• /pending — hiển thị QR đang chờ bạn đã nhận", "cmd_done": "• /done — đánh dấu QR bạn đã trả lời là hoàn tất", "cmd_failed": "• /failed — đánh dấu QR bạn đã trả lời là thất bại bằng cách chọn lý do", "cmd_earnings": "• /earnings — hiển thị thu nhập người nhận", "cmd_withdraw": "• /withdraw — yêu cầu rút tiền", "commands_after_activation": "Sau khi admin kích hoạt tài khoản, danh sách này sẽ chỉ hiển thị các lệnh cho vai trò của bạn.",
+        "support_text": "🛟 Hỗ trợ\n\nLiên hệ: {support}\n\nDùng nút bên dưới để mở chat hỗ trợ trực tiếp.", "username_hidden": "\nUsername: chưa đặt / bị ẩn", "not_registered": "Bạn chưa được đăng ký.", "not_registered_support": "Bạn chưa được đăng ký. Dùng Hỗ trợ bên dưới để yêu cầu truy cập.", "only_active_receivers": "Chỉ người nhận đang hoạt động mới có thể dùng mục này.", "only_active_receivers_on": "Chỉ người nhận đang hoạt động mới có thể dùng /on.", "only_active_receivers_off": "Chỉ người nhận đang hoạt động mới có thể dùng /off.", "on_usage": "Cách dùng: /on LIMIT\nVí dụ: /on 25", "receiver_online": "🟢 Bạn đang online. Giới hạn hiện tại: {limit} lượt scan.", "receiver_offline": "🔴 Bạn đã offline. Lời mời mới sẽ dừng cho đến khi bạn dùng /on LIMIT lại.", "sender_status_only": "/status chỉ dành cho người gửi. Dùng /pending cho tác vụ QR và /earnings cho số dư của bạn.", "sender_status_only_menu": "/status chỉ dành cho người gửi. Dùng QR đang chờ và Thu nhập trong menu người nhận.", "notify_receiver_online": "🟢 Hiện có người nhận đang online.\n📊 Giới hạn hiện tại: {limit} lượt scan.\n\nDùng /status để xem tổng sức chứa đang hoạt động.", "notify_receiver_offline": "🔴 Một người nhận đã offline.\nVui lòng kiểm tra /status trước khi gửi thêm QR.",
+        "no_pending_qrs": "Không có QR đang chờ đã nhận.", "pending_header": "Các QR đang chờ bạn đã nhận:\nNhấn một ID bên dưới để mở lại QR cụ thể đó.\n", "history_title": "📜 Lịch sử QR", "history_page": "<b>📜 Lịch sử QR — Trang {page}/{total_pages}</b>", "history_showing": "Hiển thị 10 nhật ký QR mỗi trang, mới nhất trước.", "history_empty": "Chưa có lịch sử QR.", "qr_id": "ID QR", "date_time": "Ngày/Giờ", "photo_no": "Số ảnh", "status": "Trạng thái", "charged": "Đã tính phí", "earned": "Đã kiếm", "status_done": "✅ Hoàn tất", "status_failed": "❌ Thất bại", "status_expired": "⌛ Hết hạn", "status_pending": "⏳ Đang chờ", "btn_prev": "⬅️ Trước", "btn_next": "Tiếp ➡️",
+        "marketplace_messages_title": "💬 Tin nhắn preset marketplace", "marketplace_messages_text": "Chọn một preset bên dưới. Tin nhắn sẽ được gửi đến tất cả {target} đang hoạt động.\nBất kỳ nút trả lời nào họ nhấn sẽ chỉ gửi lại cho bạn.", "target_receivers": "người nhận", "target_senders": "người gửi", "preset_private_only": "Vui lòng chỉ dùng tin nhắn preset trong chat riêng.", "no_presets": "Hiện không có tin nhắn preset nào cho vai trò của bạn.", "preset_menu_wrong_user": "Menu preset này thuộc về tài khoản khác.", "invalid_preset_button": "Nút preset không hợp lệ.", "preset_not_active": "Tin nhắn preset này không còn hoạt động.", "preset_not_for_role": "Preset này không khả dụng cho vai trò của bạn.", "no_active_recipients": "Hiện không có {role} đang hoạt động.", "could_not_send_any": "Không thể gửi cho bất kỳ {role} đang hoạt động nào lúc này.", "sent_failed": "Đã gửi cho {sent}. {failed} lỗi.", "sent_ok": "Đã gửi ✅", "already_answered_closed": "✅ Đã được trả lời.\nTin nhắn marketplace này đã đóng.", "invalid_reply_button": "Nút trả lời không hợp lệ.", "reply_no_longer_available": "Trả lời preset này không còn khả dụng.", "reply_not_for_account": "Nút trả lời này không dành cho tài khoản của bạn.", "reply_mismatch": "Trả lời này không khớp với tin nhắn gốc.", "reply_not_for_role": "Trả lời này không khả dụng cho vai trò của bạn.", "already_answered_other": "Đã có người khác trả lời.", "marketplace_msg_unavailable": "Tin nhắn marketplace này không còn khả dụng.", "reply_saved_notify_failed": "Đã lưu trả lời, nhưng hiện không thể thông báo cho người gửi.", "reply_sent": "Đã gửi trả lời ✅",
+        "receiver_earnings_title": "💰 *Thu nhập người nhận*", "total_earned": "Tổng thu nhập", "paid": "Đã trả", "requested": "Đã yêu cầu", "available_withdraw": "Có thể rút", "wallet_title": "👛 *Ví của bạn*", "usdt_balance": "💵 Số dư USDT", "reserved": "🔒 Đang giữ", "available": "✅ Khả dụng", "only_active_senders_wallet": "Chỉ người gửi đang hoạt động mới có thể dùng /wallet.", "only_active_senders_load": "Chỉ người gửi đang hoạt động mới có thể nạp ví.", "only_senders_load": "Chỉ người gửi mới có thể nạp ví.", "loadwallet_hint": "Dùng /loadwallet để nạp ví.", "amount_gt_zero": "Số tiền phải lớn hơn 0.", "could_not_create_deposit": "Không thể tạo khoản nạp: {error}", "topup_no_methods": "👛 *Nạp ví*\n\n⚠️ Hiện chưa cấu hình phương thức nạp ví. Vui lòng liên hệ hỗ trợ.", "topup_choose": "👛 *Nạp ví*\n\nChọn cách bạn muốn thêm tiền:", "only_receivers_pending": "Chỉ người nhận mới có tác vụ QR đang chờ.", "only_senders_status": "Chỉ người gửi mới có thể dùng mục này."
+    },
+    "zh": {
+        "private_only": "请只在私聊中使用此机器人。", "choose_language": "🌐 请选择您的语言。", "language_saved": "✅ 语言已更新为中文。", "language_menu_hint": "您可以随时使用 /language 更改。", "btn_open_support": "💬 打开客服聊天", "btn_back": "⬅️ 返回", "btn_back_menu": "⬅️ 返回菜单", "btn_language": "🌐 语言", "btn_commands": "📋 命令", "btn_support": "🛟 客服", "btn_wallet": "👛 钱包", "btn_status": "📡 状态", "btn_messages": "💬 消息", "btn_history": "📜 QR 历史", "btn_stats": "📊 统计", "btn_dispute": "⚠️ 申诉", "btn_earnings": "💰 收益", "btn_pending_qr": "📥 待处理 QR", "btn_topup_wallet": "➕ 钱包充值", "btn_wallet_history": "👛 钱包历史", "btn_withdraw": "💸 提现",
+        "registered_sender": "✅ 您已注册为<b>发送方</b>。\n\n📤 请发送一张只包含一个 UPI AutoPay QR 码的照片。\n🧼 我会把它重新生成干净的 QR，并作为公开任务发送给在线接收方。\n\n请使用下方菜单查看钱包、市场消息、QR 历史、申诉、统计、命令、语言和客服。", "registered_receiver": "✅ 您已注册为<b>接收方/买家</b>。\n\n🟢 准备好接收 QR 任务时请上线。\n📥 接收的 QR 会显示在这里，并带有 Done/Failed 按钮。\n\n请使用下方菜单查看收益、待处理 QR、市场消息、QR 历史、申诉、统计、命令、语言和客服。", "not_registered_menu": "👋 您尚未注册。\n\n🆔 您的聊天 ID：<code>{chat_id}</code>\n\n📩 请把此 ID 发送给客服/admin 以获取访问权限。\n\n👤 客服：{support}",
+        "commands_title": "📋 可用命令和用法", "commands_role": "角色：{role}", "commands_general": "通用：", "cmd_start": "• /start — 打开主菜单", "cmd_commands": "• /commands — 显示此命令列表", "cmd_language": "• /language — 更改语言", "cmd_myid": "• /myid — 显示您的 Telegram 聊天 ID 和用户名", "cmd_support": "• /support — 显示客服联系方式和打开聊天按钮", "cmd_messages": "• /messages — 发送预设市场广播", "cmd_history": "• /history — 显示您的 QR 历史", "cmd_dispute": "• /dispute — 打开客服申诉", "cmd_stats": "• /stats — 显示您的总计", "commands_sender": "发送方：", "cmd_send_qr": "• 发送 QR 照片 — 创建新的公开 QR 扫描任务", "cmd_status": "• /status — 显示市场接收方容量", "cmd_wallet": "• /wallet — 显示钱包余额", "cmd_loadwallet": "• /loadwallet — 给钱包充值", "commands_receiver": "接收方：", "cmd_on": "• /on LIMIT — 上线，例如：/on 25", "cmd_off": "• /off — 下线", "cmd_pending": "• /pending — 显示您已领取的待处理 QR", "cmd_done": "• /done — 将您回复的 QR 标记为完成", "cmd_failed": "• /failed — 选择原因并将您回复的 QR 标记为失败", "cmd_earnings": "• /earnings — 显示接收方收益", "cmd_withdraw": "• /withdraw — 申请提现", "commands_after_activation": "管理员激活您的账户后，此列表将只显示适合您角色的命令。",
+        "support_text": "🛟 客服\n\n联系方式：{support}\n\n使用下方按钮直接打开客服聊天。", "username_hidden": "\n用户名：未设置 / 已隐藏", "not_registered": "您尚未注册。", "not_registered_support": "您尚未注册。请使用下方客服申请访问权限。", "only_active_receivers": "只有活跃接收方可以使用此功能。", "only_active_receivers_on": "只有活跃接收方可以使用 /on。", "only_active_receivers_off": "只有活跃接收方可以使用 /off。", "on_usage": "用法：/on LIMIT\n示例：/on 25", "receiver_online": "🟢 您已上线。当前限制：{limit} 次扫描。", "receiver_offline": "🔴 您已下线。新任务会停止，直到您再次使用 /on LIMIT。", "sender_status_only": "/status 仅供发送方使用。请使用 /pending 查看 QR 任务，使用 /earnings 查看余额。", "sender_status_only_menu": "/status 仅供发送方使用。请从接收方菜单使用待处理 QR 和收益。", "notify_receiver_online": "🟢 现在有接收方在线。\n📊 当前限制：{limit} 次扫描。\n\n使用 /status 查看总实时容量。", "notify_receiver_offline": "🔴 一位接收方已下线。\n发送更多 QR 前请检查 /status。",
+        "no_pending_qrs": "没有已领取的待处理 QR。", "pending_header": "您已领取的待处理 QR：\n点击下方 ID 重新打开对应 QR。\n", "history_title": "📜 QR 历史", "history_page": "<b>📜 QR 历史 — 第 {page}/{total_pages} 页</b>", "history_showing": "每页显示 10 条 QR 记录，最新优先。", "history_empty": "暂无 QR 历史。", "qr_id": "QR ID", "date_time": "日期/时间", "photo_no": "照片编号", "status": "状态", "charged": "已扣款", "earned": "已赚取", "status_done": "✅ 已完成", "status_failed": "❌ 失败", "status_expired": "⌛ 已过期", "status_pending": "⏳ 待处理", "btn_prev": "⬅️ 上一页", "btn_next": "下一页 ➡️",
+        "marketplace_messages_title": "💬 市场预设消息", "marketplace_messages_text": "请选择下方预设。它会发送给所有活跃的{target}。\n他们点击的任何回复按钮只会返回给您。", "target_receivers": "接收方", "target_senders": "发送方", "preset_private_only": "请只在私聊中使用预设消息。", "no_presets": "目前没有适合您角色的预设消息。", "preset_menu_wrong_user": "此预设菜单属于另一个账户。", "invalid_preset_button": "无效的预设按钮。", "preset_not_active": "此预设消息不再可用。", "preset_not_for_role": "此预设不适用于您的角色。", "no_active_recipients": "目前没有活跃{role}。", "could_not_send_any": "目前无法发送给任何活跃{role}。", "sent_failed": "已发送给 {sent} 个用户，{failed} 个失败。", "sent_ok": "已发送 ✅", "already_answered_closed": "✅ 已回复。\n此市场消息已关闭。", "invalid_reply_button": "无效的回复按钮。", "reply_no_longer_available": "此预设回复不再可用。", "reply_not_for_account": "此回复按钮不属于您的账户。", "reply_mismatch": "此回复与原始消息不匹配。", "reply_not_for_role": "此回复不适用于您的角色。", "already_answered_other": "已被其他人回复。", "marketplace_msg_unavailable": "此市场消息不再可用。", "reply_saved_notify_failed": "回复已保存，但现在无法通知发送方。", "reply_sent": "回复已发送 ✅",
+        "receiver_earnings_title": "💰 *接收方收益*", "total_earned": "总收益", "paid": "已支付", "requested": "已申请", "available_withdraw": "可提现", "wallet_title": "👛 *您的钱包*", "usdt_balance": "💵 USDT 余额", "reserved": "🔒 已预留", "available": "✅ 可用", "only_active_senders_wallet": "只有活跃发送方可以使用 /wallet。", "only_active_senders_load": "只有活跃发送方可以给钱包充值。", "only_senders_load": "只有发送方可以给钱包充值。", "loadwallet_hint": "请使用 /loadwallet 给钱包充值。", "amount_gt_zero": "金额必须大于 0。", "could_not_create_deposit": "无法创建充值：{error}", "topup_no_methods": "👛 *钱包充值*\n\n⚠️ 目前没有配置钱包充值付款方式。请联系客服。", "topup_choose": "👛 *钱包充值*\n\n请选择添加资金的方式：", "only_receivers_pending": "只有接收方有待处理 QR 任务。", "only_senders_status": "只有发送方可以使用此功能。"
+    },
+    "es": {
+        "private_only": "Usa este bot solo en un chat privado.", "choose_language": "🌐 Elige tu idioma.", "language_saved": "✅ Idioma actualizado a español.", "language_menu_hint": "Puedes cambiarlo en cualquier momento con /language.", "btn_open_support": "💬 Abrir chat de soporte", "btn_back": "⬅️ Volver", "btn_back_menu": "⬅️ Volver al menú", "btn_language": "🌐 Idioma", "btn_commands": "📋 Comandos", "btn_support": "🛟 Soporte", "btn_wallet": "👛 Billetera", "btn_status": "📡 Estado", "btn_messages": "💬 Mensajes", "btn_history": "📜 Historial QR", "btn_stats": "📊 Estadísticas", "btn_dispute": "⚠️ Disputa", "btn_earnings": "💰 Ganancias", "btn_pending_qr": "📥 QR pendientes", "btn_topup_wallet": "➕ Recargar billetera", "btn_wallet_history": "👛 Historial de billetera", "btn_withdraw": "💸 Retirar",
+        "registered_sender": "✅ Estás registrado como <b>remitente</b>.\n\n📤 Envía una foto que contenga exactamente un código QR de UPI AutoPay.\n🧼 Lo reconstruiré como un QR limpio y lo publicaré como una oferta abierta para los receptores en línea.\n\nUsa el menú de abajo para billetera, mensajes del marketplace, historial QR, disputas, estadísticas, comandos, idioma y soporte.", "registered_receiver": "✅ Estás registrado como <b>receptor/comprador</b>.\n\n🟢 Ponte en línea cuando estés listo para recibir ofertas QR.\n📥 Los QR aceptados aparecerán aquí con botones Done/Failed.\n\nUsa el menú de abajo para ganancias, QR pendientes, mensajes del marketplace, historial QR, disputas, estadísticas, comandos, idioma y soporte.", "not_registered_menu": "👋 Aún no estás registrado.\n\n🆔 Tu ID de chat: <code>{chat_id}</code>\n\n📩 Envía este ID a soporte/admin para obtener acceso.\n\n👤 Soporte: {support}",
+        "commands_title": "📋 Comandos disponibles y uso", "commands_role": "Rol: {role}", "commands_general": "General:", "cmd_start": "• /start — abrir el menú principal", "cmd_commands": "• /commands — mostrar esta lista de comandos", "cmd_language": "• /language — cambiar tu idioma", "cmd_myid": "• /myid — mostrar tu ID de chat de Telegram y usuario", "cmd_support": "• /support — mostrar contacto de soporte y botón para abrir chat", "cmd_messages": "• /messages — enviar un broadcast predefinido del marketplace", "cmd_history": "• /history — mostrar tu historial QR", "cmd_dispute": "• /dispute — abrir una disputa de soporte", "cmd_stats": "• /stats — mostrar tus totales", "commands_sender": "Remitente:", "cmd_send_qr": "• Enviar una foto QR — crear una nueva oferta abierta de escaneo QR", "cmd_status": "• /status — mostrar la capacidad de receptores del marketplace", "cmd_wallet": "• /wallet — mostrar el saldo de tu billetera", "cmd_loadwallet": "• /loadwallet — recargar tu billetera", "commands_receiver": "Receptor:", "cmd_on": "• /on LIMIT — ponerse en línea, ejemplo: /on 25", "cmd_off": "• /off — ponerse fuera de línea", "cmd_pending": "• /pending — mostrar tus QR pendientes reclamados", "cmd_done": "• /done — marcar como hecho el QR al que respondiste", "cmd_failed": "• /failed — marcar como fallido el QR al que respondiste eligiendo un motivo", "cmd_earnings": "• /earnings — mostrar ganancias del receptor", "cmd_withdraw": "• /withdraw — solicitar retiro", "commands_after_activation": "Después de que el admin active tu cuenta, esta lista mostrará solo los comandos de tu rol.",
+        "support_text": "🛟 Soporte\n\nContacto: {support}\n\nUsa el botón de abajo para abrir directamente el chat de soporte.", "username_hidden": "\nUsuario: no configurado / oculto", "not_registered": "Aún no estás registrado.", "not_registered_support": "Aún no estás registrado. Usa Soporte abajo para solicitar acceso.", "only_active_receivers": "Solo los receptores activos pueden usar esto.", "only_active_receivers_on": "Solo los receptores activos pueden usar /on.", "only_active_receivers_off": "Solo los receptores activos pueden usar /off.", "on_usage": "Uso: /on LIMIT\nEjemplo: /on 25", "receiver_online": "🟢 Estás en línea. Límite actual: {limit} escaneos.", "receiver_offline": "🔴 Estás fuera de línea. Las nuevas ofertas se detendrán hasta que uses /on LIMIT otra vez.", "sender_status_only": "/status es solo para remitentes. Usa /pending para tus tareas QR y /earnings para tu saldo.", "sender_status_only_menu": "/status es solo para remitentes. Usa QR pendientes y Ganancias desde el menú de receptor.", "notify_receiver_online": "🟢 Un receptor está en línea ahora.\n📊 Límite actual: {limit} escaneos.\n\nUsa /status para ver la capacidad total en vivo.", "notify_receiver_offline": "🔴 Un receptor se desconectó.\nRevisa /status antes de enviar más QR.",
+        "no_pending_qrs": "No hay QR pendientes reclamados.", "pending_header": "Tus QR pendientes reclamados:\nToca un ID abajo para volver a abrir ese QR específico.\n", "history_title": "📜 Historial QR", "history_page": "<b>📜 Historial QR — Página {page}/{total_pages}</b>", "history_showing": "Mostrando 10 registros QR por página, los más nuevos primero.", "history_empty": "Aún no hay historial QR.", "qr_id": "ID QR", "date_time": "Fecha/Hora", "photo_no": "N.º de foto", "status": "Estado", "charged": "Cobrado", "earned": "Ganado", "status_done": "✅ Hecho", "status_failed": "❌ Fallido", "status_expired": "⌛ Vencido", "status_pending": "⏳ Pendiente", "btn_prev": "⬅️ Anterior", "btn_next": "Siguiente ➡️",
+        "marketplace_messages_title": "💬 Mensajes predefinidos del marketplace", "marketplace_messages_text": "Elige un preset abajo. Se enviará a todos los {target} activos.\nCualquier botón de respuesta que toquen volverá solo a ti.", "target_receivers": "receptores", "target_senders": "remitentes", "preset_private_only": "Usa los mensajes predefinidos solo en chat privado.", "no_presets": "No hay mensajes predefinidos disponibles para tu rol ahora mismo.", "preset_menu_wrong_user": "Este menú predefinido pertenece a otra cuenta.", "invalid_preset_button": "Botón predefinido inválido.", "preset_not_active": "Este mensaje predefinido ya no está activo.", "preset_not_for_role": "Este preset no está disponible para tu rol.", "no_active_recipients": "No se encontraron {role} activos ahora mismo.", "could_not_send_any": "No se pudo enviar a ningún {role} activo ahora mismo.", "sent_failed": "Enviado a {sent}. {failed} fallaron.", "sent_ok": "Enviado ✅", "already_answered_closed": "✅ Ya respondido.\nEste mensaje del marketplace está cerrado.", "invalid_reply_button": "Botón de respuesta inválido.", "reply_no_longer_available": "Esta respuesta predefinida ya no está disponible.", "reply_not_for_account": "Este botón de respuesta no es para tu cuenta.", "reply_mismatch": "Esta respuesta no coincide con el mensaje original.", "reply_not_for_role": "Esta respuesta no está disponible para tu rol.", "already_answered_other": "Ya respondió otra persona.", "marketplace_msg_unavailable": "Este mensaje del marketplace ya no está disponible.", "reply_saved_notify_failed": "Respuesta guardada, pero no se pudo notificar al remitente ahora mismo.", "reply_sent": "Respuesta enviada ✅",
+        "receiver_earnings_title": "💰 *Ganancias del receptor*", "total_earned": "Total ganado", "paid": "Pagado", "requested": "Solicitado", "available_withdraw": "Disponible para retirar", "wallet_title": "👛 *Tu billetera*", "usdt_balance": "💵 Saldo USDT", "reserved": "🔒 Reservado", "available": "✅ Disponible", "only_active_senders_wallet": "Solo los remitentes activos pueden usar /wallet.", "only_active_senders_load": "Solo los remitentes activos pueden recargar la billetera.", "only_senders_load": "Solo los remitentes pueden recargar la billetera.", "loadwallet_hint": "Usa /loadwallet para recargar tu billetera.", "amount_gt_zero": "El monto debe ser mayor que 0.", "could_not_create_deposit": "No se pudo crear el depósito: {error}", "topup_no_methods": "👛 *Recargar billetera*\n\n⚠️ No hay métodos de pago de recarga configurados ahora mismo. Contacta con soporte.", "topup_choose": "👛 *Recargar billetera*\n\nElige cómo quieres añadir fondos:", "only_receivers_pending": "Solo los receptores tienen tareas QR pendientes.", "only_senders_status": "Solo los remitentes pueden usar esto."
+    }
+}
+
+# Use Indonesian/Vietnamese/Chinese/Spanish translations above and fall back to English for unchanged keys.
+for _code, _meta in SUPPORTED_LANGUAGES.items():
+    _TRANSLATIONS.setdefault(_code, {})
+    for _k, _v in _TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
+def normalize_language_code(value: str | None) -> str:
+    code = str(value or "").strip().lower()
+    if code in {"english", "eng"}:
+        return "en"
+    if code in {"indonesian", "indo", "bahasa", "bahasa indonesia"}:
+        return "id"
+    if code in {"vietnamese", "viet", "tiếng việt", "tieng viet"}:
+        return "vi"
+    if code in {"chinese", "zh-cn", "zh_hans", "mandarin", "中文"}:
+        return "zh"
+    if code in {"spanish", "español", "espanol"}:
+        return "es"
+    return code if code in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+
+
+def tr_lang(lang: str | None, key: str, **kwargs) -> str:
+    lang = normalize_language_code(lang)
+    text = _TRANSLATIONS.get(lang, {}).get(key) or _TRANSLATIONS[DEFAULT_LANGUAGE].get(key) or key
+    try:
+        return text.format(**kwargs)
+    except Exception:
+        return text
+
+
+def get_user_language(chat_id: int | None) -> str:
+    if chat_id is None:
+        return DEFAULT_LANGUAGE
+    try:
+        with get_conn() as conn:
+            row = conn.execute("SELECT language FROM user_languages WHERE chat_id = ?", (int(chat_id),)).fetchone()
+        if row:
+            return normalize_language_code(row["language"])
+    except Exception:
+        pass
+    return DEFAULT_LANGUAGE
+
+
+def tr_chat(chat_id: int | None, key: str, **kwargs) -> str:
+    return tr_lang(get_user_language(chat_id), key, **kwargs)
+
+
+def mark_first_start_seen(chat_id: int) -> bool:
+    """Return True when this is the first /start we have seen for this chat."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT first_start_seen FROM user_languages WHERE chat_id = ?", (int(chat_id),)).fetchone()
+        if row:
+            if int(row["first_start_seen"] or 0):
+                return False
+            conn.execute(
+                "UPDATE user_languages SET first_start_seen = 1, updated_at = ? WHERE chat_id = ?",
+                (now_iso(), int(chat_id)),
+            )
+            return True
+        conn.execute(
+            "INSERT INTO user_languages(chat_id, language, first_start_seen, updated_at) VALUES (?, ?, 1, ?)",
+            (int(chat_id), DEFAULT_LANGUAGE, now_iso()),
+        )
+    return True
+
+
+def set_user_language(chat_id: int, language: str) -> str:
+    code = normalize_language_code(language)
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_languages(chat_id, language, first_start_seen, updated_at)
+            VALUES (?, ?, 1, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                language = excluded.language,
+                first_start_seen = 1,
+                updated_at = excluded.updated_at
+            """,
+            (int(chat_id), code, now_iso()),
+        )
+    return code
+
+
+def language_selection_keyboard(chat_id: int | None = None, include_back: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("🇬🇧 English", callback_data="language:set:en")],
+        [InlineKeyboardButton("🇮🇩 Bahasa Indonesia", callback_data="language:set:id")],
+        [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="language:set:vi")],
+        [InlineKeyboardButton("🇨🇳 中文", callback_data="language:set:zh")],
+        [InlineKeyboardButton("🇪🇸 Español", callback_data="language:set:es")],
+    ]
+    if include_back:
+        rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")])
+    return InlineKeyboardMarkup(rows)
+
+
+def language_selection_text(chat_id: int | None = None) -> str:
+    return f"{tr_chat(chat_id, 'choose_language')}\n\n{tr_chat(chat_id, 'language_menu_hint')}"
+
+
+def language_options_html(selected: str | None = None, include_all: bool = False) -> str:
+    selected = normalize_language_code(selected)
+    options = []
+    if include_all:
+        options.append('<option value="all">All languages</option>')
+    for code, meta in SUPPORTED_LANGUAGES.items():
+        sel = ' selected' if code == selected and not include_all else ''
+        options.append(f'<option value="{html.escape(code)}"{sel}>{html.escape(meta["name"])} / {html.escape(meta["native"])}</option>')
+    return "".join(options)
 
 
 @dataclass(frozen=True)
@@ -787,6 +1092,13 @@ def init_db() -> None:
                 first_name TEXT,
                 last_name TEXT,
                 last_seen_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_languages (
+                chat_id INTEGER PRIMARY KEY,
+                language TEXT NOT NULL DEFAULT 'en',
+                first_start_seen INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS admin_settings (
@@ -2316,6 +2628,38 @@ def active_senders(limit: int = 1000) -> list[sqlite3.Row]:
             LIMIT ?
             """,
             (limit,),
+        ).fetchall()
+
+
+def users_for_language_broadcast(language: str = "all", role: str = "all", limit: int = 10000) -> list[sqlite3.Row]:
+    language = str(language or "all").strip().lower()
+    if language != "all":
+        language = normalize_language_code(language)
+    role = str(role or "all").strip().lower()
+    if role not in {"all", "sender", "receiver"}:
+        role = "all"
+    clauses = ["u.active = 1", "u.chat_id != 0"]
+    params: list[Any] = []
+    if role != "all":
+        clauses.append("u.role = ?")
+        params.append(role)
+    if language != "all":
+        clauses.append("COALESCE(ul.language, ?) = ?")
+        params.extend([DEFAULT_LANGUAGE, language])
+    where = " AND ".join(clauses)
+    params.append(max(1, int(limit or 10000)))
+    with get_conn() as conn:
+        return conn.execute(
+            f"""
+            SELECT u.*, COALESCE(ul.language, ?) AS language, p.username, p.first_name, p.last_name
+            FROM users u
+            LEFT JOIN user_languages ul ON ul.chat_id = u.chat_id
+            LEFT JOIN telegram_profiles p ON p.chat_id = u.chat_id
+            WHERE {where}
+            ORDER BY u.updated_at DESC
+            LIMIT ?
+            """,
+            [DEFAULT_LANGUAGE] + params,
         ).fetchall()
 
 
@@ -5890,119 +6234,108 @@ def split_chunks(lines: list[str], max_len: int = 3500) -> Iterable[str]:
 # -----------------------------
 
 
-def main_menu_keyboard(user: UserRow | None = None) -> InlineKeyboardMarkup:
+def main_menu_keyboard(user: UserRow | None = None, chat_id: int | None = None) -> InlineKeyboardMarkup:
     if user and user.active and user.role == "receiver":
         return InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton("💰 Earnings", callback_data="nav:wallet"),
-                    InlineKeyboardButton("📥 Pending QR", callback_data="nav:pending"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_earnings"), callback_data="nav:wallet"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_pending_qr"), callback_data="nav:pending"),
                 ],
                 [
-                    InlineKeyboardButton("💬 Messages", callback_data="nav:messages"),
-                    InlineKeyboardButton("📜 QR History", callback_data="nav:history"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_messages"), callback_data="nav:messages"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_history"), callback_data="nav:history"),
                 ],
                 [
-                    InlineKeyboardButton("📊 Stats", callback_data="nav:stats"),
-                    InlineKeyboardButton("⚠️ Dispute", callback_data="nav:dispute"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_stats"), callback_data="nav:stats"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data="nav:dispute"),
                 ],
                 [
-                    InlineKeyboardButton("📋 Commands", callback_data="nav:commands"),
-                    InlineKeyboardButton("🛟 Support", callback_data="nav:support"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_commands"), callback_data="nav:commands"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_language"), callback_data="nav:language"),
                 ],
+                [InlineKeyboardButton(tr_chat(chat_id, "btn_support"), callback_data="nav:support")],
             ]
         )
     if user and user.active and user.role == "sender":
         return InlineKeyboardMarkup(
             [
                 [
-                    InlineKeyboardButton("👛 Wallet", callback_data="nav:wallet"),
-                    InlineKeyboardButton("📡 Status", callback_data="nav:status"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_wallet"), callback_data="nav:wallet"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_status"), callback_data="nav:status"),
                 ],
                 [
-                    InlineKeyboardButton("💬 Messages", callback_data="nav:messages"),
-                    InlineKeyboardButton("📜 QR History", callback_data="nav:history"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_messages"), callback_data="nav:messages"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_history"), callback_data="nav:history"),
                 ],
                 [
-                    InlineKeyboardButton("📊 Stats", callback_data="nav:stats"),
-                    InlineKeyboardButton("⚠️ Dispute", callback_data="nav:dispute"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_stats"), callback_data="nav:stats"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data="nav:dispute"),
                 ],
                 [
-                    InlineKeyboardButton("📋 Commands", callback_data="nav:commands"),
-                    InlineKeyboardButton("🛟 Support", callback_data="nav:support"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_commands"), callback_data="nav:commands"),
+                    InlineKeyboardButton(tr_chat(chat_id, "btn_language"), callback_data="nav:language"),
                 ],
+                [InlineKeyboardButton(tr_chat(chat_id, "btn_support"), callback_data="nav:support")],
             ]
         )
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("📋 Commands", callback_data="nav:commands")],
-            [InlineKeyboardButton("🛟 Support", callback_data="nav:support")],
+            [InlineKeyboardButton(tr_chat(chat_id, "btn_commands"), callback_data="nav:commands")],
+            [InlineKeyboardButton(tr_chat(chat_id, "btn_language"), callback_data="nav:language")],
+            [InlineKeyboardButton(tr_chat(chat_id, "btn_support"), callback_data="nav:support")],
         ]
     )
 
 
 def main_menu_text(user: UserRow | None, chat_id: int) -> str:
     if user and user.active and user.role == "sender":
-        return (
-            "✅ You are registered as a <b>sender</b>.\n\n"
-            "📤 Send a photo containing exactly one UPI AutoPay QR code.\n"
-            "🧼 I will rebuild it as a clean QR and post it as an open offer to online receivers.\n\n"
-            "Use the menu below for wallet, marketplace messages, QR history, disputes, stats, commands, and support."
-        )
+        return tr_chat(chat_id, "registered_sender")
     if user and user.active and user.role == "receiver":
-        return (
-            "✅ You are registered as a <b>receiver/buyer</b>.\n\n"
-            "🟢 Go online when you are ready to receive QR offers.\n"
-            "📥 Accepted QRs will appear here with Done/Failed buttons.\n\n"
-            "Use the menu below for earnings, pending QRs, marketplace messages, QR history, disputes, stats, commands, and support."
-        )
-    return (
-        "👋 You are not registered yet.\n\n"
-        f"🆔 Your chat ID: <code>{chat_id}</code>\n\n"
-        "📩 Send this ID to support/admin to get access.\n\n"
-        f"👤 Support: {html.escape(support_display_text())}"
-    )
+        return tr_chat(chat_id, "registered_receiver")
+    return tr_chat(chat_id, "not_registered_menu", chat_id=chat_id, support=html.escape(support_display_text()))
 
 
-def commands_help_text(user: UserRow | None = None) -> str:
-    lines = ["📋 Available commands and usage"]
+def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) -> str:
+    lines = [tr_chat(chat_id, "commands_title")]
     if user and user.active:
-        lines.append(f"Role: {user.role}")
+        lines.append(tr_chat(chat_id, "commands_role", role=user.role))
     lines.extend([
         "",
-        "General:",
-        "• /start — open the main menu",
-        "• /commands — show this command list",
-        "• /myid — show your Telegram chat ID and username",
-        "• /support — show support contact and open-chat button",
-        "• /messages — send a preset marketplace broadcast",
-        "• /history — show your QR history",
-        "• /dispute — open a support dispute",
-        "• /stats — show your totals",
+        tr_chat(chat_id, "commands_general"),
+        tr_chat(chat_id, "cmd_start"),
+        tr_chat(chat_id, "cmd_commands"),
+        tr_chat(chat_id, "cmd_language"),
+        tr_chat(chat_id, "cmd_myid"),
+        tr_chat(chat_id, "cmd_support"),
+        tr_chat(chat_id, "cmd_messages"),
+        tr_chat(chat_id, "cmd_history"),
+        tr_chat(chat_id, "cmd_dispute"),
+        tr_chat(chat_id, "cmd_stats"),
     ])
     if user and user.active and user.role == "sender":
         lines.extend([
             "",
-            "Sender:",
-            "• Send a QR photo — create a new open QR scan offer",
-            "• /status — show marketplace receiver capacity",
-            "• /wallet — show your wallet balance",
-            "• /loadwallet — Top-up your wallet",
+            tr_chat(chat_id, "commands_sender"),
+            tr_chat(chat_id, "cmd_send_qr"),
+            tr_chat(chat_id, "cmd_status"),
+            tr_chat(chat_id, "cmd_wallet"),
+            tr_chat(chat_id, "cmd_loadwallet"),
         ])
     elif user and user.active and user.role == "receiver":
         lines.extend([
             "",
-            "Receiver:",
-            "• /on LIMIT — go online, example: /on 25",
-            "• /off — go offline",
-            "• /pending — show your claimed pending QRs",
-            "• /done — mark the QR you replied to as done",
-            "• /failed — mark the QR you replied to as failed by selecting a reason",
-            "• /earnings — show receiver earnings",
-            "• /withdraw — request payout",
+            tr_chat(chat_id, "commands_receiver"),
+            tr_chat(chat_id, "cmd_on"),
+            tr_chat(chat_id, "cmd_off"),
+            tr_chat(chat_id, "cmd_pending"),
+            tr_chat(chat_id, "cmd_done"),
+            tr_chat(chat_id, "cmd_failed"),
+            tr_chat(chat_id, "cmd_earnings"),
+            tr_chat(chat_id, "cmd_withdraw"),
         ])
     else:
-        lines.extend(["", "After admin activates your account, this list will show only the commands for your role."])
+        lines.extend(["", tr_chat(chat_id, "commands_after_activation")])
     return "\n".join(lines)
 
 
@@ -6011,26 +6344,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_chat or not update.message:
         return
     if update.effective_chat.type != ChatType.PRIVATE:
-        await update.message.reply_text("Please use this bot only in private chat.")
+        await update.message.reply_text(tr_chat(update.effective_chat.id, "private_only"))
         return
 
     chat_id = update.effective_chat.id
+    first_start = mark_first_start_seen(chat_id)
     user = ensure_default_sender_user(chat_id)
     await refresh_bot_commands_for_chat(context.bot, chat_id, user)
+
+    if first_start:
+        await update.message.reply_text(
+            language_selection_text(chat_id),
+            reply_markup=language_selection_keyboard(chat_id, include_back=False),
+        )
+        return
 
     await update.message.reply_text(
         main_menu_text(user, chat_id),
         parse_mode="HTML",
-        reply_markup=main_menu_keyboard(user),
+        reply_markup=main_menu_keyboard(user, chat_id),
     )
 
 
 async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     observe_telegram_profile(update.effective_user)
     if update.message and update.effective_chat:
+        chat_id = update.effective_chat.id
         username = getattr(update.effective_user, "username", None) if update.effective_user else None
-        suffix = f"\nUsername: @{username}" if username else "\nUsername: not set / hidden"
-        await update.message.reply_text(f"Your ID is:\n`{update.effective_chat.id}`{suffix}", parse_mode="Markdown")
+        suffix = tr_chat(chat_id, "username_set", username=username) if username else tr_chat(chat_id, "username_hidden")
+        await update.message.reply_text(tr_chat(chat_id, "myid_text", chat_id=chat_id, suffix=suffix), parse_mode="Markdown")
 
 
 async def commands_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6039,20 +6381,49 @@ async def commands_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     user = get_user(update.effective_chat.id)
     await update.message.reply_text(
-        commands_help_text(user),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="nav:home")]]),
+        commands_help_text(user, update.effective_chat.id),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(update.effective_chat.id, "btn_back_menu"), callback_data="nav:home")]]),
     )
 
 
 async def support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     observe_telegram_profile(update.effective_user)
-    if not update.message:
+    if not update.message or not update.effective_chat:
         return
+    chat_id = update.effective_chat.id
     await update.message.reply_text(
-        "🛟 Support\n\n"
-        f"Contact: {support_display_text()}\n\n"
-        "Use the button below to open the support chat directly.",
-        reply_markup=support_keyboard(include_back=False),
+        tr_chat(chat_id, "support_text", support=support_display_text()),
+        reply_markup=support_keyboard(include_back=False, chat_id=chat_id),
+    )
+
+
+async def language_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    observe_telegram_profile(update.effective_user)
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    mark_first_start_seen(chat_id)
+    await update.message.reply_text(
+        language_selection_text(chat_id),
+        reply_markup=language_selection_keyboard(chat_id, include_back=True),
+    )
+
+
+async def language_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    chat_id = query.message.chat.id
+    data = query.data or ""
+    code = normalize_language_code(data.rsplit(":", 1)[-1])
+    set_user_language(chat_id, code)
+    user = get_user(chat_id) or ensure_default_sender_user(chat_id)
+    await refresh_bot_commands_for_chat(context.bot, chat_id, user)
+    await query.answer(tr_lang(code, "language_saved"), show_alert=False)
+    await query.edit_message_text(
+        f"{tr_lang(code, 'language_saved')}\n\n{main_menu_text(user, chat_id)}",
+        parse_mode="HTML",
+        reply_markup=main_menu_keyboard(user, chat_id),
     )
 
 
@@ -6065,7 +6436,7 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     user = get_user(chat_id)
     if not user or not user.active:
-        await update.message.reply_text("You are not registered yet.")
+        await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
 
     if user.role == "sender":
@@ -6081,9 +6452,9 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def _receiver_pending_text_keyboard(chat_id: int) -> tuple[str, InlineKeyboardMarkup | None]:
     rows = user_recent_claimed_pending(chat_id)
     if not rows:
-        return "No claimed pending QRs.", None
+        return tr_chat(chat_id, "no_pending_qrs"), None
 
-    lines = ["Your claimed pending QRs:", "Tap an ID below to reopen that specific QR.", ""]
+    lines = [tr_chat(chat_id, "pending_header"), ""]
     keyboard: list[list[InlineKeyboardButton]] = []
     for row in rows:
         public_id = str(row["public_id"])
@@ -6142,28 +6513,28 @@ def _history_datetime(value: str | datetime | None) -> str:
         return esc(value or "")
 
 
-def _qr_history_entry_lines(row: sqlite3.Row, role: str) -> list[str]:
+def _qr_history_entry_lines(row: sqlite3.Row, role: str, chat_id: int | None = None) -> list[str]:
     status = str(row["status"] or "pending").lower()
     offer_state = str(row["offer_state"] or "").replace("_", " ").strip().title()
     if status == "done":
-        status_text = "✅ Done"
+        status_text = tr_chat(chat_id, "status_done")
     elif status == "failed":
-        status_text = "❌ Failed"
+        status_text = tr_chat(chat_id, "status_failed")
     elif offer_state.lower() == "expired":
-        status_text = "⌛ Expired"
+        status_text = tr_chat(chat_id, "status_expired")
     elif offer_state:
-        status_text = f"⏳ Pending — {offer_state}"
+        status_text = f"{tr_chat(chat_id, 'status_pending')} — {offer_state}"
     else:
-        status_text = "⏳ Pending"
-    amount_label = "Charged" if role == "sender" else "Earned"
+        status_text = tr_chat(chat_id, "status_pending")
+    amount_label = tr_chat(chat_id, "charged") if role == "sender" else tr_chat(chat_id, "earned")
     amount_value = row["charged_usdt"] if role == "sender" else row["earned_usdt"]
     # Privacy rule: never show the opposite party identity in user-facing QR history.
     # Senders and receivers/buyers must not see each other's chat IDs, aliases, usernames, or links.
     return [
-        f"<b>QR ID:</b> <code>{esc(row['public_id'])}</code>",
-        f"<b>Date/Time:</b> {esc(_history_datetime(row['created_at']))}",
-        f"<b>Photo No:</b> #{esc(row['daily_no'])}",
-        f"<b>Status:</b> {esc(status_text)}",
+        f"<b>{tr_chat(chat_id, 'qr_id')}:</b> <code>{esc(row['public_id'])}</code>",
+        f"<b>{tr_chat(chat_id, 'date_time')}:</b> {esc(_history_datetime(row['created_at']))}",
+        f"<b>{tr_chat(chat_id, 'photo_no')}:</b> #{esc(row['daily_no'])}",
+        f"<b>{tr_chat(chat_id, 'status')}:</b> {esc(status_text)}",
         f"<b>{amount_label}:</b> ${_money(amount_value)} USDT",
     ]
 
@@ -6173,24 +6544,24 @@ def _qr_history_text_keyboard(chat_id: int, user: UserRow, page: int = 0, page_s
     total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
     page = max(0, min(int(page or 0), total_pages - 1))
     rows = user_qr_history_rows(chat_id, user.role, page_size, page * page_size)
-    title = "📜 QR History"
-    lines = [f"<b>{esc(title)} — Page {page + 1}/{total_pages}</b>", "Showing 10 QR logs per page, newest first.", ""]
+    title = tr_chat(chat_id, "history_title")
+    lines = [tr_chat(chat_id, "history_page", page=page + 1, total_pages=total_pages), tr_chat(chat_id, "history_showing"), ""]
     if not rows:
-        lines.append("No QR history yet.")
+        lines.append(tr_chat(chat_id, "history_empty"))
     else:
         for idx, row in enumerate(rows, start=1):
             if idx > 1:
                 lines.append("")
-            lines.extend(_qr_history_entry_lines(row, user.role))
+            lines.extend(_qr_history_entry_lines(row, user.role, chat_id))
     buttons: list[list[InlineKeyboardButton]] = []
     nav: list[InlineKeyboardButton] = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"qr_history:{page-1}"))
+        nav.append(InlineKeyboardButton(tr_chat(chat_id, "btn_prev"), callback_data=f"qr_history:{page-1}"))
     if page + 1 < total_pages:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"qr_history:{page+1}"))
+        nav.append(InlineKeyboardButton(tr_chat(chat_id, "btn_next"), callback_data=f"qr_history:{page+1}"))
     if nav:
         buttons.append(nav)
-    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:home")])
+    buttons.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")])
     return "\n".join(lines), InlineKeyboardMarkup(buttons)
 
 
@@ -6206,7 +6577,7 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
     if not user or not user.active:
-        await update.message.reply_text("You are not registered yet.")
+        await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
     text, markup = _qr_history_text_keyboard(chat_id, user, 0)
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=markup)
@@ -6220,7 +6591,7 @@ async def pending_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     user = get_user(chat_id)
     if not user or user.role != "receiver" or not user.active:
-        await update.message.reply_text("Only active receivers can use this.")
+        await update.message.reply_text(tr_chat(chat_id, "only_active_receivers"))
         return
     text, markup = _receiver_pending_text_keyboard(chat_id)
     await update.message.reply_text(text, reply_markup=markup)
@@ -6256,19 +6627,19 @@ def _message_event_route(initiator_chat_id: int, initiator_role: str, recipient_
     return recipient_chat_id, initiator_chat_id, "receiver_to_sender"
 
 
-def _messages_menu_text(user: UserRow) -> str:
-    target = "receivers" if user.role == "sender" else "senders"
+def _messages_menu_text(user: UserRow, chat_id: int | None = None) -> str:
+    target_key = "target_receivers" if user.role == "sender" else "target_senders"
+    target = tr_chat(chat_id, target_key)
     return (
-        "💬 Marketplace preset messages\n\n"
-        f"Choose a preset below. It will be sent to all active {target}.\n"
-        "Any reply button they tap will come back only to you."
+        f"{tr_chat(chat_id, 'marketplace_messages_title')}\n\n"
+        f"{tr_chat(chat_id, 'marketplace_messages_text', target=target)}"
     )
 
 
 async def _show_messages_menu(message_or_query, chat_id: int) -> None:
     user = get_user(chat_id)
     if not user or not user.active:
-        text = "You are not registered yet."
+        text = tr_chat(chat_id, "not_registered")
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text)
         else:
@@ -6277,8 +6648,8 @@ async def _show_messages_menu(message_or_query, chat_id: int) -> None:
 
     markup = build_template_keyboard(user.role, chat_id)
     if not markup:
-        text = "No preset messages are available for your role right now."
-        back = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:home")]])
+        text = tr_chat(chat_id, "no_presets")
+        back = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]])
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text, reply_markup=back)
         else:
@@ -6286,12 +6657,12 @@ async def _show_messages_menu(message_or_query, chat_id: int) -> None:
         return
 
     rows = list(markup.inline_keyboard)
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:home")])
+    rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")])
     markup = InlineKeyboardMarkup(rows)
     if hasattr(message_or_query, "edit_message_text"):
-        await message_or_query.edit_message_text(_messages_menu_text(user), reply_markup=markup)
+        await message_or_query.edit_message_text(_messages_menu_text(user, chat_id), reply_markup=markup)
     else:
-        await message_or_query.reply_text(_messages_menu_text(user), reply_markup=markup)
+        await message_or_query.reply_text(_messages_menu_text(user, chat_id), reply_markup=markup)
 
 
 async def messages_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -6299,7 +6670,7 @@ async def messages_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not update.message or not update.effective_chat:
         return
     if update.effective_chat.type != ChatType.PRIVATE:
-        await update.message.reply_text("Please use preset messages only in private chat.")
+        await update.message.reply_text(tr_chat(update.effective_chat.id, "preset_private_only"))
         return
     await _show_messages_menu(update.message, update.effective_chat.id)
 
@@ -6315,40 +6686,40 @@ async def preset_send_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         _prefix, owner_raw, template_raw = parts
         try:
             if int(owner_raw) != chat_id:
-                await query.answer("This preset menu belongs to another account.", show_alert=True)
+                await query.answer(tr_chat(chat_id, "preset_menu_wrong_user"), show_alert=True)
                 return
         except ValueError:
-            await query.answer("Invalid preset button.", show_alert=True)
+            await query.answer(tr_chat(chat_id, "invalid_preset_button"), show_alert=True)
             return
     elif len(parts) == 2:
         _prefix, template_raw = parts
     else:
-        await query.answer("Invalid preset button.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "invalid_preset_button"), show_alert=True)
         return
 
     user = get_user(chat_id)
     if not user or not user.active:
-        await query.answer("You are not registered yet.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "not_registered"), show_alert=True)
         return
 
     try:
         template_id = int(template_raw)
     except ValueError:
-        await query.answer("Invalid preset button.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "invalid_preset_button"), show_alert=True)
         return
 
     template = get_message_template(template_id)
     if not template or not int(template["active"]):
-        await query.answer("This preset message is no longer active.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "preset_not_active"), show_alert=True)
         return
     if not _audience_allows(str(template["audience"]), user.role):
-        await query.answer("This preset is not available for your role.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "preset_not_for_role"), show_alert=True)
         return
 
     recipient_role = _opposite_role(user.role)
     recipients = [r for r in _preset_recipients_for_role(user.role) if int(r["chat_id"]) != chat_id]
     if not recipients:
-        await query.answer(f"No active {recipient_role}s found right now.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "no_active_recipients", role=tr_chat(chat_id, "target_" + recipient_role + "s")), show_alert=True)
         return
 
     broadcast_id = f"msg_{int(time.time())}_{chat_id}_{template_id}_{secrets.token_hex(6)}"
@@ -6382,12 +6753,12 @@ async def preset_send_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             failed += 1
 
     if sent == 0:
-        await query.answer(f"Could not send to any active {recipient_role} right now.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "could_not_send_any", role=tr_chat(chat_id, "target_" + recipient_role + "s")), show_alert=True)
         return
     if failed:
-        await query.answer(f"Sent to {sent}. {failed} failed.", show_alert=False)
+        await query.answer(tr_chat(chat_id, "sent_failed", sent=sent, failed=failed), show_alert=False)
     else:
-        await query.answer("Sent ✅", show_alert=False)
+        await query.answer(tr_chat(chat_id, "sent_ok"), show_alert=False)
 
 
 async def _delete_or_close_marketplace_message(context: ContextTypes.DEFAULT_TYPE, event: sqlite3.Row) -> None:
@@ -6404,7 +6775,7 @@ async def _delete_or_close_marketplace_message(context: ContextTypes.DEFAULT_TYP
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=int(message_id),
-            text="✅ Already answered.\nThis marketplace message is closed.",
+            text=tr_chat(chat_id, "already_answered_closed"),
             reply_markup=None,
         )
     except TelegramError:
@@ -6431,27 +6802,27 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         event_id = int(event_raw)
         reply_id = int(reply_raw)
     except Exception:
-        await query.answer("Invalid reply button.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "invalid_reply_button"), show_alert=True)
         return
 
     user = get_user(chat_id)
     if not user or not user.active:
-        await query.answer("You are not registered yet.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "not_registered"), show_alert=True)
         return
 
     event = get_message_event(event_id)
     reply = get_message_reply(reply_id)
     if not event or not reply or not int(reply["active"]):
-        await query.answer("This preset reply is no longer available.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "reply_no_longer_available"), show_alert=True)
         return
     if int(event["recipient_chat_id"]) != chat_id:
-        await query.answer("This reply button is not for your account.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "reply_not_for_account"), show_alert=True)
         return
     if int(reply["template_id"]) != int(event["template_id"]):
-        await query.answer("This reply does not match the original message.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "reply_mismatch"), show_alert=True)
         return
     if not _audience_allows(str(reply["audience"]), user.role):
-        await query.answer("This reply is not available for your role.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "reply_not_for_role"), show_alert=True)
         return
 
     claimed, reason, claimed_event, other_events = claim_message_broadcast_reply(event_id, reply_id)
@@ -6461,9 +6832,9 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         except TelegramError:
             pass
         if reason in {"already_answered", "closed"}:
-            await query.answer("Already answered by someone else.", show_alert=True)
+            await query.answer(tr_chat(chat_id, "already_answered_other"), show_alert=True)
         else:
-            await query.answer("This marketplace message is no longer available.", show_alert=True)
+            await query.answer(tr_chat(chat_id, "marketplace_msg_unavailable"), show_alert=True)
         return
 
     event = claimed_event or event
@@ -6476,7 +6847,7 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     except TelegramError as exc:
         logger.warning("Could not deliver preset reply %s for event %s to %s: %s", reply_id, event_id, event["initiator_chat_id"], exc)
-        await query.answer("Reply saved, but the sender could not be notified right now.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "reply_saved_notify_failed"), show_alert=True)
         return
 
     try:
@@ -6484,7 +6855,7 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     except TelegramError:
         pass
     await _clear_other_marketplace_messages(context, other_events)
-    await query.answer("Reply sent ✅", show_alert=False)
+    await query.answer(tr_chat(chat_id, "reply_sent"), show_alert=False)
 
 
 # -----------------------------
@@ -6492,12 +6863,14 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
 # -----------------------------
 
 
-async def notify_active_senders(context: ContextTypes.DEFAULT_TYPE, text: str) -> tuple[int, int]:
+async def notify_active_senders(context: ContextTypes.DEFAULT_TYPE, text: str | None = None, *, key: str | None = None, **kwargs) -> tuple[int, int]:
     sent = 0
     failed = 0
     for sender in active_senders():
+        sender_chat_id = int(sender["chat_id"])
+        msg_text = tr_chat(sender_chat_id, key, **kwargs) if key else str(text or "")
         try:
-            await context.bot.send_message(chat_id=int(sender["chat_id"]), text=text, protect_content=PROTECT_CONTENT)
+            await context.bot.send_message(chat_id=sender_chat_id, text=msg_text, protect_content=PROTECT_CONTENT)
             sent += 1
             await asyncio.sleep(0.03)
         except TelegramError as exc:
@@ -6513,20 +6886,21 @@ async def on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
     if not user or user.role != "receiver" or not user.active:
-        await update.message.reply_text("Only active receivers can use /on.")
+        await update.message.reply_text(tr_chat(chat_id, "only_active_receivers_on"))
         return
     try:
         limit = int(context.args[0]) if context.args else 0
     except ValueError:
         limit = 0
     if limit <= 0:
-        await update.message.reply_text("Usage: /on LIMIT\nExample: /on 25")
+        await update.message.reply_text(tr_chat(chat_id, "on_usage"))
         return
     set_receiver_online(chat_id, limit)
-    await update.message.reply_text(f"🟢 You are online. Current limit: {limit} scans.")
+    await update.message.reply_text(tr_chat(chat_id, "receiver_online", limit=limit))
     sent, failed = await notify_active_senders(
         context,
-        f"🟢 A receiver is online now.\n📊 Current limit: {limit} scans.\n\nUse /status to see total live capacity.",
+        key="notify_receiver_online",
+        limit=limit,
     )
     logger.info("Receiver %s online; notified senders sent=%s failed=%s", chat_id, sent, failed)
 
@@ -6538,13 +6912,13 @@ async def off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
     if not user or user.role != "receiver" or not user.active:
-        await update.message.reply_text("Only active receivers can use /off.")
+        await update.message.reply_text(tr_chat(chat_id, "only_active_receivers_off"))
         return
     set_receiver_offline(chat_id)
-    await update.message.reply_text("🔴 You are offline. New offers will stop until you use /on LIMIT again.")
+    await update.message.reply_text(tr_chat(chat_id, "receiver_offline"))
     sent, failed = await notify_active_senders(
         context,
-        "🔴 A receiver went offline.\nPlease check /status before sending more QRs.",
+        key="notify_receiver_offline",
     )
     logger.info("Receiver %s offline; notified senders sent=%s failed=%s", chat_id, sent, failed)
 
@@ -6555,10 +6929,10 @@ async def marketplace_status_cmd(update: Update, context: ContextTypes.DEFAULT_T
         return
     user = get_user(update.effective_chat.id)
     if not user or not user.active:
-        await update.message.reply_text("You are not registered yet.")
+        await update.message.reply_text(tr_chat(update.effective_chat.id, "not_registered"))
         return
     if user.role == "receiver":
-        await update.message.reply_text("/status is only for senders. Use /pending for your QR tasks and /earnings for your balance.")
+        await update.message.reply_text(tr_chat(update.effective_chat.id, "sender_status_only"))
         return
     await update.message.reply_text(marketplace_status_text(update.effective_chat.id))
 
@@ -6582,25 +6956,25 @@ FAIL_REASON_BUTTONS: list[tuple[str, str]] = [
 ]
 
 
-def _wallet_main_keyboard(user_role: str) -> InlineKeyboardMarkup:
+def _wallet_main_keyboard(user_role: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if user_role == "sender":
-        rows.append([InlineKeyboardButton("➕ Top-up Wallet", callback_data="nav:loadwallet")])
-        rows.append([InlineKeyboardButton("👛 Wallet History", callback_data="wallet_history:0")])
+        rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_topup_wallet"), callback_data="nav:loadwallet")])
+        rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_wallet_history"), callback_data="wallet_history:0")])
     elif user_role == "receiver":
-        rows.append([InlineKeyboardButton("💸 Withdraw", callback_data="withdraw:start")])
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:home")])
+        rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_withdraw"), callback_data="withdraw:start")])
+    rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")])
     return InlineKeyboardMarkup(rows)
 
 
 def _receiver_earnings_text(chat_id: int) -> str:
     wallet, _due, requested, available, _paid = receiver_earnings_numbers(chat_id)
     return (
-        "💰 *Receiver earnings*\n\n"
-        f"Total earned: *${_money(wallet['earned_usdt'])} USDT*\n"
-        f"Paid: *${_money(wallet['paid_usdt'])} USDT*\n"
-        f"Requested: *${_money(requested)} USDT*\n"
-        f"Available to withdraw: *${_money(available)} USDT*"
+        f"{tr_chat(chat_id, 'receiver_earnings_title')}\n\n"
+        f"{tr_chat(chat_id, 'total_earned')}: *${_money(wallet['earned_usdt'])} USDT*\n"
+        f"{tr_chat(chat_id, 'paid')}: *${_money(wallet['paid_usdt'])} USDT*\n"
+        f"{tr_chat(chat_id, 'requested')}: *${_money(requested)} USDT*\n"
+        f"{tr_chat(chat_id, 'available_withdraw')}: *${_money(available)} USDT*"
     )
 
 
@@ -6608,10 +6982,10 @@ def _sender_wallet_text(chat_id: int) -> str:
     wallet = get_wallet(chat_id)
     available = _dec(wallet["balance_usdt"]) - _dec(wallet["reserved_usdt"])
     return (
-        "👛 *Your Wallet*\n\n"
-        f"💵 USDT Balance: *${_money(wallet['balance_usdt'])}*\n"
-        f"🔒 Reserved: *${_money(wallet['reserved_usdt'])}*\n"
-        f"✅ Available: *${_money(available)}*"
+        f"{tr_chat(chat_id, 'wallet_title')}\n\n"
+        f"{tr_chat(chat_id, 'usdt_balance')}: *${_money(wallet['balance_usdt'])}*\n"
+        f"{tr_chat(chat_id, 'reserved')}: *${_money(wallet['reserved_usdt'])}*\n"
+        f"{tr_chat(chat_id, 'available')}: *${_money(available)}*"
     )
 
 
@@ -6624,7 +6998,7 @@ def _topup_methods_keyboard(settings: dict | None = None) -> InlineKeyboardMarku
         rows.append([InlineKeyboardButton("🟣 USDT (POLYGON)", callback_data="wallet_currency:polygon")])
     if payment_method_enabled("binance", settings):
         rows.append([InlineKeyboardButton("🟡 Binance Pay", callback_data="wallet_currency:binance")])
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:wallet")])
+    rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -7038,26 +7412,26 @@ def _wallet_history_text(chat_id: int, page: int = 0, page_size: int = 10) -> tu
     if nav:
         buttons.append(nav)
     buttons.append([InlineKeyboardButton("➕ Top-up Again", callback_data="nav:loadwallet")])
-    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:wallet")])
+    buttons.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")])
     return "\n".join(lines), InlineKeyboardMarkup(buttons)
 
 
 async def _send_wallet_home(message, chat_id: int) -> None:
     user = get_user(chat_id)
     if not user or not user.active:
-        await message.reply_text("You are not registered yet.")
+        await message.reply_text(tr_chat(chat_id, "not_registered"))
         return
     if user.role == "sender":
         await message.reply_text(
             _sender_wallet_text(chat_id),
             parse_mode="Markdown",
-            reply_markup=_wallet_main_keyboard("sender"),
+            reply_markup=_wallet_main_keyboard("sender", chat_id),
         )
     else:
         await message.reply_text(
             _receiver_earnings_text(chat_id),
             parse_mode="Markdown",
-            reply_markup=_wallet_main_keyboard("receiver"),
+            reply_markup=_wallet_main_keyboard("receiver", chat_id),
         )
 
 
@@ -7065,13 +7439,13 @@ async def _send_load_wallet_options(message, chat_id: int) -> None:
     settings = get_marketplace_settings()
     if not available_payment_methods(settings):
         await message.reply_text(
-            "👛 *Top-up Wallet*\n\n⚠️ No wallet top-up payment methods are configured right now. Please contact support.",
+            tr_chat(chat_id, "topup_no_methods"),
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:wallet")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]]),
         )
         return
     await message.reply_text(
-        "👛 *Top-up Wallet*\n\nChoose how you'd like to add funds:",
+        tr_chat(chat_id, "topup_choose"),
         parse_mode="Markdown",
         reply_markup=_topup_methods_keyboard(settings),
     )
@@ -7223,15 +7597,15 @@ async def wallet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
     if not user or not user.active:
-        await update.message.reply_text("You are not registered yet.")
+        await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
     if user.role != "sender":
-        await update.message.reply_text("Only active senders can use /wallet.")
+        await update.message.reply_text(tr_chat(chat_id, "only_active_senders_wallet"))
         return
     await update.message.reply_text(
         _sender_wallet_text(chat_id),
         parse_mode="Markdown",
-        reply_markup=_wallet_main_keyboard("sender"),
+        reply_markup=_wallet_main_keyboard("sender", chat_id),
     )
 
 
@@ -7239,26 +7613,27 @@ async def loadwallet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     observe_telegram_profile(update.effective_user)
     if not update.message or not update.effective_chat:
         return
-    user = get_user(update.effective_chat.id)
+    chat_id = update.effective_chat.id
+    user = get_user(chat_id)
     if not user or user.role != "sender" or not user.active:
-        await update.message.reply_text("Only active senders can load wallet.")
+        await update.message.reply_text(tr_chat(chat_id, "only_active_senders_load"))
         return
     if not context.args:
-        await _send_load_wallet_options(update.message, update.effective_chat.id)
+        await _send_load_wallet_options(update.message, chat_id)
         return
     # Compatibility: /loadwallet 25 bep20 still works, but the bot no longer presents that as the main flow.
     if len(context.args) < 2:
-        await update.message.reply_text("Use /loadwallet to top up your wallet.")
+        await update.message.reply_text(tr_chat(chat_id, "loadwallet_hint"))
         return
     amount = _dec(context.args[0])
     method = context.args[1].strip().lower()
     if amount <= 0:
-        await update.message.reply_text("Amount must be greater than 0.")
+        await update.message.reply_text(tr_chat(chat_id, "amount_gt_zero"))
         return
     try:
-        dep = create_deposit(update.effective_chat.id, amount, method)
+        dep = create_deposit(chat_id, amount, method)
     except Exception as exc:
-        await update.message.reply_text(f"Could not create deposit: {exc}")
+        await update.message.reply_text(tr_chat(chat_id, "could_not_create_deposit", error=str(exc)))
         return
     await _send_deposit_payment_message(update.message, dep, context)
 
@@ -7274,16 +7649,20 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if data == "nav:commands":
         await query.edit_message_text(
-            commands_help_text(user),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:home")]]),
+            commands_help_text(user, chat_id),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]),
         )
         return
     if data == "nav:support":
         await query.edit_message_text(
-            "🛟 Support\n\n"
-            f"Contact: {support_display_text()}\n\n"
-            "Use the button below to open the support chat directly.",
-            reply_markup=support_keyboard(include_back=True),
+            tr_chat(chat_id, "support_text", support=support_display_text()),
+            reply_markup=support_keyboard(include_back=True, chat_id=chat_id),
+        )
+        return
+    if data == "nav:language":
+        await query.edit_message_text(
+            language_selection_text(chat_id),
+            reply_markup=language_selection_keyboard(chat_id, include_back=True),
         )
         return
     if data == "nav:home":
@@ -7296,16 +7675,16 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(
             main_menu_text(user, chat_id),
             parse_mode="HTML",
-            reply_markup=main_menu_keyboard(user),
+            reply_markup=main_menu_keyboard(user, chat_id),
         )
         return
 
     if not user or not user.active:
         await query.edit_message_text(
-            "You are not registered yet. Use Support below to request access.",
+            tr_chat(chat_id, "not_registered_support"),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛟 Support", callback_data="nav:support")],
-                [InlineKeyboardButton("⬅️ Back", callback_data="nav:home")],
+                [InlineKeyboardButton(tr_chat(chat_id, "btn_support"), callback_data="nav:support")],
+                [InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")],
             ]),
         )
         return
@@ -7319,29 +7698,29 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await query.edit_message_text(
                 _receiver_earnings_text(chat_id),
                 parse_mode="Markdown",
-                reply_markup=_wallet_main_keyboard("receiver"),
+                reply_markup=_wallet_main_keyboard("receiver", chat_id),
             )
         else:
             await query.edit_message_text(
                 _sender_wallet_text(chat_id),
                 parse_mode="Markdown",
-                reply_markup=_wallet_main_keyboard("sender"),
+                reply_markup=_wallet_main_keyboard("sender", chat_id),
             )
         return
     if data == "nav:loadwallet":
         if user.role != "sender":
-            await query.edit_message_text("Only senders can load wallet.")
+            await query.edit_message_text(tr_chat(chat_id, "only_senders_load"))
             return
         settings = get_marketplace_settings()
         if not available_payment_methods(settings):
             await query.edit_message_text(
-                "👛 *Top-up Wallet*\n\n⚠️ No wallet top-up payment methods are configured right now. Please contact support.",
+                tr_chat(chat_id, "topup_no_methods"),
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:wallet")]]),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]]),
             )
             return
         await query.edit_message_text(
-            "👛 *Top-up Wallet*\n\nChoose how you'd like to add funds:",
+            tr_chat(chat_id, "topup_choose"),
             parse_mode="Markdown",
             reply_markup=_topup_methods_keyboard(settings),
         )
@@ -7349,26 +7728,26 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if data == "nav:status":
         if user.role != "sender":
             await query.edit_message_text(
-                "/status is only for senders. Use Pending QR and Earnings from the receiver menu.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:home")]]),
+                tr_chat(chat_id, "sender_status_only_menu"),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]),
             )
             return
         await query.edit_message_text(
             marketplace_status_text(chat_id),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:home")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]),
         )
         return
     if data == "nav:pending":
         if user.role != "receiver":
-            await query.edit_message_text("Only receivers have pending QR tasks.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:home")]]))
+            await query.edit_message_text(tr_chat(chat_id, "only_receivers_pending"), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]))
             return
         text, markup = _receiver_pending_text_keyboard(chat_id)
         if markup:
             rows = list(markup.inline_keyboard)
-            rows.append([InlineKeyboardButton("⬅️ Back", callback_data="nav:home")])
+            rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")])
             markup = InlineKeyboardMarkup(rows)
         else:
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:home")]])
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]])
         await query.edit_message_text(text, reply_markup=markup)
         return
     if data == "nav:history":
@@ -7390,7 +7769,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             text = stats_summary_text("Your receiver stats", receiver_chat_id=chat_id)
         await query.edit_message_text(
             text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:home")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]),
         )
         return
 
@@ -7685,7 +8064,7 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         dep = create_deposit(chat_id, amount, network)
     except Exception as exc:
-        await update.message.reply_text(f"Could not create deposit: {exc}")
+        await update.message.reply_text(tr_chat(chat_id, "could_not_create_deposit", error=str(exc)))
         return
     await _send_deposit_payment_message(update.message, dep, context)
 
@@ -7758,7 +8137,7 @@ async def earnings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(
         _receiver_earnings_text(chat_id),
         parse_mode="Markdown",
-        reply_markup=_wallet_main_keyboard("receiver"),
+        reply_markup=_wallet_main_keyboard("receiver", chat_id),
     )
 
 
@@ -7773,7 +8152,7 @@ async def _send_withdraw_amount_prompt(message_or_query, chat_id: int) -> None:
         f"Minimum: ${_money(min_payout)} USDT\n\n"
         "Send quantity."
     )
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:wallet")]])
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]])
     if hasattr(message_or_query, "edit_message_text"):
         await message_or_query.edit_message_text(text, reply_markup=markup)
     else:
@@ -7822,7 +8201,7 @@ async def _send_withdraw_prompt(message_or_query, chat_id: int) -> None:
     settings = get_marketplace_settings()
     min_payout = _dec(settings["min_payout_usdt"])
     _wallet, _due, _requested, available, _paid = receiver_earnings_numbers(chat_id)
-    back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:wallet")]])
+    back_markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]])
     if available < min_payout:
         WITHDRAW_FLOW.pop(chat_id, None)
         text = (
@@ -7958,7 +8337,7 @@ async def submit_withdraw_request(message_or_query, chat_id: int, amount: Decima
         text = ""
     if text:
         if hasattr(message_or_query, "edit_message_text"):
-            await message_or_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="nav:wallet")]]))
+            await message_or_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]]))
         else:
             await message_or_query.reply_text(text)
         return
@@ -8056,7 +8435,7 @@ async def dispute_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def submit_dispute_reason(message, chat_id: int, reason: str) -> None:
     user = get_user(chat_id)
     if not user or not user.active:
-        await message.reply_text("You are not registered yet.")
+        await message.reply_text(tr_chat(chat_id, "not_registered"))
         DISPUTE_FLOW.pop(chat_id, None)
         return
     reason = reason.strip()
@@ -9840,6 +10219,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           <a href="/admin/payments">💳 Payment Settings</a>
           <a href="/admin/payouts">💸 Payout Requests <span class="nav-count">{pending_payout_count()}</span></a>
           <a href="/admin/disputes">⚠️ Disputes <span class="nav-count">{pending_dispute_count()}</span></a>
+          <a href="/admin/broadcast">📣 Broadcast</a>
           <a href="/admin/messages">💬 Preset Messages</a>
           <a href="/admin/stats">📊 Stats</a>
           <a href="/admin/pending">⏳ Pending QR</a>
@@ -10919,10 +11299,14 @@ async def admin_marketplace_receiver(request: Request):
     notify_text = ""
     if online:
         set_receiver_online(receiver_chat_id, limit)
-        notify_text = f"🟢 A receiver is online now.\n📊 Current limit: {limit} scans.\n\nUse /status to see total live capacity."
+        notify_key = "notify_receiver_online"
+        notify_kwargs = {"limit": limit}
+        notify_text = "receiver online"
     else:
         set_receiver_offline(receiver_chat_id)
-        notify_text = "🔴 A receiver went offline.\nPlease check /status before sending more QRs."
+        notify_key = "notify_receiver_offline"
+        notify_kwargs = {}
+        notify_text = "receiver offline"
     note = "Receiver status updated."
     if maintenance_mode_enabled():
         note += " Maintenance mode is ON, so sender notifications were not sent."
@@ -10930,7 +11314,8 @@ async def admin_marketplace_receiver(request: Request):
         sent = failed = 0
         for sender in active_senders():
             try:
-                await telegram_application.bot.send_message(chat_id=int(sender["chat_id"]), text=notify_text, protect_content=PROTECT_CONTENT)
+                sender_chat_id = int(sender["chat_id"])
+                await telegram_application.bot.send_message(chat_id=sender_chat_id, text=tr_chat(sender_chat_id, notify_key, **notify_kwargs), protect_content=PROTECT_CONTENT)
                 sent += 1
                 await asyncio.sleep(0.03)
             except TelegramError:
@@ -11693,9 +12078,13 @@ async def admin_disputes(request: Request):
         .small{font-size:12px}.dispute-actions{display:flex;gap:6px;flex-wrap:wrap}
         .dispute-chat-cell{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;min-width:190px}
         .dispute-chat-meta{flex:0 0 100%;margin-top:2px}.dispute-unread-badge{vertical-align:middle}
-        .dispute-chat-panel{width:min(820px,calc(100vw - 44px));max-height:calc(100vh - 44px);overflow:auto}
+        #dispute-chat-modal.confirm-modal-shell{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:22px;max-width:none;margin:0}
+        #dispute-chat-modal.confirm-modal-shell[hidden]{display:none!important}
+        #dispute-chat-modal .confirm-modal-backdrop{position:absolute;inset:0;z-index:0;background:rgba(0,0,0,.76);backdrop-filter:blur(3px)}
+        #dispute-chat-modal .dispute-chat-panel{position:relative;z-index:1;width:min(820px,calc(100vw - 44px));max-height:calc(100dvh - 44px);overflow:auto;margin:0;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:28px;box-shadow:0 26px 90px var(--shadow)}
         .dispute-chat-popup-log{max-height:46vh;overflow:auto;background:#0b1220;border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:16px}
         .dispute-chat-readonly-note{background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.25);border-radius:12px;padding:10px 12px;margin-top:10px;color:var(--muted)}
+        @media (max-width:820px){#dispute-chat-modal.confirm-modal-shell{padding:10px}#dispute-chat-modal .dispute-chat-panel{width:calc(100vw - 20px);max-height:calc(100dvh - 20px);padding:18px}.dispute-chat-popup-log{max-height:42dvh}}
         </style>'''
         body += '<div class="table-wrap"><table><tr><th>ID</th><th>QR</th><th>User</th><th>Replies</th><th>Status</th><th>Created</th><th>Action</th></tr>'
         for r in paged:
@@ -11784,6 +12173,10 @@ async def admin_disputes(request: Request):
       const chatContent = document.getElementById('dispute-chat-content');
       const readonlyNote = document.getElementById('dispute-chat-readonly');
       if (!shell || !submitForm || !chatContent) return;
+      // Keep the dispute popup outside the admin layout/sidebar stacking context.
+      if (shell.parentElement !== document.body) {
+        document.body.appendChild(shell);
+      }
 
       function closeModal() {
         shell.hidden = true;
@@ -11822,6 +12215,7 @@ async def admin_disputes(request: Request):
           textarea.value = '';
           textarea.placeholder = mode === 'reject' ? 'Final rejection message.' : (mode === 'resolve' ? 'Final resolved message.' : 'Type your reply.');
         }
+        document.body.classList.remove('sidebar-open');
         shell.hidden = false;
         chatContent.scrollTop = chatContent.scrollHeight;
         if (textarea && !isReadOnly) textarea.focus();
@@ -11970,6 +12364,110 @@ async def admin_dispute_reject(request: Request, dispute_id: int):
     return redirect_with_msg("/admin/disputes", "Dispute was already updated or not found.")
 
 
+
+def admin_broadcast_form_html(action: str = "/admin/broadcast") -> str:
+    language_options = [
+        ("all", "All languages"),
+        ("en", "English"),
+        ("id", "Indonesian / Bahasa Indonesia"),
+        ("vi", "Vietnamese / Tiếng Việt"),
+        ("zh", "Chinese / 中文"),
+        ("es", "Spanish / Español"),
+    ]
+    role_options = [
+        ("all", "All active users"),
+        ("sender", "Senders only"),
+        ("receiver", "Receivers only"),
+    ]
+    lang_html = "".join(f'<option value="{esc(code)}">{esc(label)}</option>' for code, label in language_options)
+    role_html = "".join(f'<option value="{esc(code)}">{esc(label)}</option>' for code, label in role_options)
+    return f'''
+    <div class="card"><h2>📣 Broadcast</h2>
+      <p class="muted">Send an admin-written Telegram message to users by selected bot language. The message is sent exactly as typed and is not auto-translated.</p>
+      <form method="post" action="{esc(action)}">
+        <div class="row">
+          <div><label>Send to language</label><select name="language">{lang_html}</select></div>
+          <div><label>Target users</label><select name="role">{role_html}</select></div>
+        </div>
+        <label>Broadcast message</label><textarea name="message_text" required placeholder="Write the exact message to send. It will only go to the selected language group."></textarea>
+        <button type="submit">📣 Send broadcast</button>
+      </form>
+      <p class="muted small">Users who never selected a language are treated as English. Admin panel text and admin-written messages remain English/unchanged.</p>
+    </div>
+    '''
+
+
+def admin_broadcast_counts_html() -> str:
+    languages = [("all", "All languages")] + [(code, meta["name"]) for code, meta in SUPPORTED_LANGUAGES.items()]
+    roles = [("all", "All"), ("sender", "Senders"), ("receiver", "Receivers")]
+    rows_html = ""
+    for code, label in languages:
+        cells = []
+        for role, _role_label in roles:
+            try:
+                count = len(users_for_language_broadcast(code, role, limit=10000))
+            except Exception:
+                count = 0
+            cells.append(f"<td>{count}</td>")
+        rows_html += f"<tr><td>{esc(label)}</td>{''.join(cells)}</tr>"
+    return f'''
+    <div class="card"><h3>Audience counts</h3>
+      <div class="table-wrap"><table class="compact-table">
+        <tr><th>Language</th><th>All</th><th>Senders</th><th>Receivers</th></tr>
+        {rows_html}
+      </table></div>
+      <p class="muted small">Counts include active users only.</p>
+    </div>
+    '''
+
+
+async def send_admin_language_broadcast_from_form(form, redirect_path: str) -> RedirectResponse:
+    language_raw = str(form.get("language", "all")).strip().lower() or "all"
+    role = str(form.get("role", "all")).strip().lower() or "all"
+    if role not in {"all", "sender", "receiver"}:
+        role = "all"
+    language = "all" if language_raw == "all" else normalize_language_code(language_raw)
+    message_text = str(form.get("message_text", "")).strip()
+    if not message_text:
+        return redirect_with_msg(redirect_path, "Broadcast message is required.")
+    if len(message_text) > 3900:
+        return redirect_with_msg(redirect_path, "Broadcast message is too long. Keep it under 3900 characters.")
+    rows = users_for_language_broadcast(language, role)
+    if not rows:
+        lang_label = "all languages" if language == "all" else SUPPORTED_LANGUAGES[language]["name"]
+        return redirect_with_msg(redirect_path, f"No active {role} users found for {lang_label}.")
+    if telegram_application is None:
+        return redirect_with_msg(redirect_path, "Bot is not ready; could not send broadcast.")
+    sent = failed = 0
+    for row in rows:
+        try:
+            await telegram_application.bot.send_message(chat_id=int(row["chat_id"]), text=message_text, protect_content=PROTECT_CONTENT)
+            sent += 1
+            await asyncio.sleep(0.03)
+        except TelegramError:
+            failed += 1
+    lang_label = "all languages" if language == "all" else SUPPORTED_LANGUAGES[language]["name"]
+    return redirect_with_msg(redirect_path, f"Broadcast sent to {sent} {role} users for {lang_label}. Failed: {failed}.")
+
+
+@web_app.get("/admin/broadcast", response_class=HTMLResponse)
+async def admin_broadcast_page(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    body = admin_broadcast_form_html("/admin/broadcast") + admin_broadcast_counts_html()
+    return render_page("Broadcast", body, request)
+
+
+@web_app.post("/admin/broadcast")
+async def admin_broadcast_send(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    return await send_admin_language_broadcast_from_form(form, "/admin/broadcast")
+
+
 @web_app.get("/admin/messages", response_class=HTMLResponse)
 async def admin_messages(request: Request):
     guard = admin_guard(request)
@@ -12021,6 +12519,10 @@ async def admin_messages(request: Request):
         <label>Reply text delivered back</label><textarea name="reply_text" required placeholder="I am available right now."></textarea>
         <button type="submit">➕ Add reply</button>
       </form>
+    </div>
+    <div class="card"><h3>📣 Broadcast</h3>
+      <p class="muted">Broadcast now has its own sidebar panel.</p>
+      <a class="btn" href="/admin/broadcast">Open Broadcast panel</a>
     </div>
     '''
 
@@ -12201,6 +12703,15 @@ async def admin_messages_import(request: Request):
         return redirect_with_msg("/admin/messages", f"Could not import presets: {exc}")
     action = "replaced" if mode == "replace" else "imported"
     return redirect_with_msg("/admin/messages", f"Presets {action}: {message_count} messages and {reply_count} replies.")
+
+
+@web_app.post("/admin/messages/broadcast")
+async def admin_messages_language_broadcast(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    return await send_admin_language_broadcast_from_form(form, "/admin/broadcast")
 
 
 @web_app.post("/admin/messages/add")
@@ -12570,6 +13081,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
         ("start", "Open main menu"),
         ("commands", "Show commands"),
         ("support", "Open support contact"),
+        ("language", "Change language"),
         ("messages", "Preset marketplace messages"),
         ("myid", "Show your chat ID"),
         ("history", "Show QR history"),
@@ -12630,6 +13142,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("commands", commands_cmd))
     app.add_handler(CommandHandler("support", support_cmd))
+    app.add_handler(CommandHandler("language", language_cmd))
     app.add_handler(CommandHandler("messages", messages_cmd))
     app.add_handler(CommandHandler("myid", myid))
     app.add_handler(CommandHandler("status", marketplace_status_cmd))
@@ -12646,7 +13159,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("pending", pending_cmd))
     app.add_handler(CommandHandler("done", done_cmd))
     app.add_handler(CommandHandler("failed", failed_cmd))
-    app.add_handler(CallbackQueryHandler(wallet_nav_button, pattern=r"^nav:(wallet|loadwallet|status|pending|history|dispute|stats|messages|commands|support|home)$"))
+    app.add_handler(CallbackQueryHandler(wallet_nav_button, pattern=r"^nav:(wallet|loadwallet|status|pending|history|dispute|stats|messages|commands|support|language|home)$"))
+    app.add_handler(CallbackQueryHandler(language_button, pattern=r"^language:set:"))
     app.add_handler(CallbackQueryHandler(wallet_currency_button, pattern=r"^wallet_currency:"))
     app.add_handler(CallbackQueryHandler(wallet_history_button, pattern=r"^wallet_history:"))
     app.add_handler(CallbackQueryHandler(qr_history_button, pattern=r"^qr_history:"))
