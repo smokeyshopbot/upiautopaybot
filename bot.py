@@ -1410,6 +1410,20 @@ for _code in SUPPORTED_LANGUAGES:
     for _k, _v in _PAYMENT_ALERT_TRANSLATIONS["en"].items():
         _TRANSLATIONS[_code].setdefault(_k, _v)
 
+_DISPUTE_TIMING_TRANSLATIONS = {
+    "en": {"dispute_only_after_finished": "You can open a dispute only after this QR order is marked Done or Failed."},
+    "id": {"dispute_only_after_finished": "Anda hanya dapat membuka sengketa setelah pesanan QR ini ditandai Selesai atau Gagal."},
+    "vi": {"dispute_only_after_finished": "Bạn chỉ có thể mở tranh chấp sau khi đơn QR này được đánh dấu Hoàn tất hoặc Thất bại."},
+    "zh": {"dispute_only_after_finished": "只有在此 QR 订单标记为完成或失败后，才能开启争议。"},
+    "es": {"dispute_only_after_finished": "Solo puedes abrir una disputa después de que este pedido QR esté marcado como Completado o Fallido."},
+}
+for _code, _items in _DISPUTE_TIMING_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _DISPUTE_TIMING_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
 _SUPPORT_FALLBACK_TRANSLATIONS = {
     "en": {"support_not_configured": "Support is not configured yet. Please contact the owner."},
     "id": {"support_not_configured": "Dukungan belum dikonfigurasi. Silakan hubungi pemilik."},
@@ -7361,6 +7375,13 @@ def receiver_status_keyboard(public_id: str, chat_id: int | None = None) -> Inli
                 InlineKeyboardButton(tr_chat(chat_id, "btn_done"), callback_data=f"done:{public_id}"),
                 InlineKeyboardButton(tr_chat(chat_id, "btn_failed"), callback_data=f"failed:{public_id}"),
             ],
+        ]
+    )
+
+
+def qr_dispute_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
             [InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data=f"disputeqr:{public_id}")],
         ]
     )
@@ -7389,7 +7410,6 @@ def sender_notify_keyboard(public_id: str, chat_id: int | None = None) -> Inline
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(tr_chat(chat_id, "btn_notify_receiver"), callback_data=f"notify:{public_id}")],
-            [InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data=f"disputeqr:{public_id}")],
         ]
     )
 
@@ -9593,12 +9613,14 @@ def _validate_dispute_public_id(chat_id: int, user: UserRow, public_id: str | No
     row = get_photo_record(public_id)
     if not row:
         return False, tr_chat(chat_id, "qr_id_not_found")
-    if is_admin(chat_id):
-        return True, None
-    if user.role == "sender" and int(row["sender_chat_id"]) != chat_id:
-        return False, tr_chat(chat_id, "qr_not_linked_sender")
-    if user.role == "receiver" and int(row["receiver_chat_id"] or 0) != chat_id:
-        return False, tr_chat(chat_id, "qr_not_linked_receiver")
+    if not is_admin(chat_id):
+        if user.role == "sender" and int(row["sender_chat_id"]) != chat_id:
+            return False, tr_chat(chat_id, "qr_not_linked_sender")
+        if user.role == "receiver" and int(row["receiver_chat_id"] or 0) != chat_id:
+            return False, tr_chat(chat_id, "qr_not_linked_receiver")
+    order_status = str(row["status"] or "").lower()
+    if order_status not in {"done", "failed"}:
+        return False, tr_chat(chat_id, "dispute_only_after_finished")
     return True, None
 
 
@@ -10249,7 +10271,7 @@ async def complete_photo(
                 chat_id=photo.receiver_chat_id,
                 message_id=photo.receiver_message_id,
                 caption=receiver_caption,
-                reply_markup=None,
+                reply_markup=qr_dispute_keyboard(photo.public_id, photo.receiver_chat_id or actor_chat_id),
             )
         except TelegramError as exc:
             logger.warning("Could not edit receiver QR caption %s/%s: %s", photo.receiver_chat_id, photo.receiver_message_id, exc)
@@ -10261,7 +10283,7 @@ async def complete_photo(
                 chat_id=photo.sender_chat_id,
                 message_id=photo.sender_message_id,
                 caption=sender_caption,
-                reply_markup=None,
+                reply_markup=qr_dispute_keyboard(photo.public_id, photo.sender_chat_id),
             )
         except TelegramError as exc:
             logger.warning("Could not edit sender QR caption %s/%s: %s", photo.sender_chat_id, photo.sender_message_id, exc)
@@ -10779,7 +10801,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
                     chat_id=note_chat_id,
                     message_id=note_message_id,
                     caption=expired_caption_for(note_chat_id),
-                    reply_markup=None,
+                    reply_markup=qr_dispute_keyboard(public_id, note_chat_id),
                 )
             else:
                 await bot.edit_message_text(
@@ -10798,7 +10820,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
                 chat_id=claimed_receiver_id,
                 message_id=receiver_message_id,
                 caption=expired_caption_for(claimed_receiver_id),
-                reply_markup=None,
+                reply_markup=qr_dispute_keyboard(public_id, claimed_receiver_id),
             )
         except TelegramError:
             pass
@@ -10810,7 +10832,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
                 chat_id=sender_chat_id,
                 message_id=int(row["sender_message_id"]),
                 caption=expired_caption_for(sender_chat_id),
-                reply_markup=None,
+                reply_markup=qr_dispute_keyboard(public_id, sender_chat_id),
             )
     except TelegramError:
         pass
@@ -10891,7 +10913,7 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
                 chat_id=sender_id,
                 message_id=int(row["sender_message_id"]),
                 caption=expired_admin_caption_for(sender_id),
-                reply_markup=None,
+                reply_markup=qr_dispute_keyboard(public_id, sender_id),
             )
     except TelegramError:
         pass
@@ -10903,7 +10925,7 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
                 chat_id=receiver_id,
                 message_id=int(row["receiver_message_id"]),
                 caption=expired_admin_caption_for(receiver_id),
-                reply_markup=None,
+                reply_markup=qr_dispute_keyboard(public_id, receiver_id),
             )
     except TelegramError:
         pass
@@ -10989,7 +11011,7 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
                 chat_id=chat_id,
                 message_id=message_id,
                 caption=caption,
-                reply_markup=None,
+                reply_markup=qr_dispute_keyboard(public_id, chat_id),
             )
         except TelegramError as exc:
             logger.warning("Could not edit %s caption after admin status change for %s: %s", label, public_id, exc)
