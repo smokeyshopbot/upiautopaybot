@@ -626,6 +626,36 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_disputes_ref_id ON disputes(ref_id)")
     except Exception:
         logger.exception("Could not backfill dispute references")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dispute_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dispute_id INTEGER NOT NULL,
+            sender_type TEXT NOT NULL CHECK(sender_type IN ('user','admin')),
+            sender_chat_id INTEGER,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(dispute_id) REFERENCES disputes(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute ON dispute_messages(dispute_id, created_at)")
+    try:
+        rows = conn.execute(
+            """
+            SELECT d.id, d.chat_id, d.message, d.created_at
+            FROM disputes d
+            LEFT JOIN dispute_messages m ON m.dispute_id = d.id
+            WHERE m.id IS NULL
+            """
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, 'user', ?, ?, ?)",
+                (row["id"], row["chat_id"], row["message"], row["created_at"] or now_iso()),
+            )
+    except Exception:
+        logger.exception("Could not backfill dispute chat messages")
 
     conn.execute(
         """
@@ -982,6 +1012,16 @@ def init_db() -> None:
                 admin_note TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS dispute_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dispute_id INTEGER NOT NULL,
+                sender_type TEXT NOT NULL CHECK(sender_type IN ('user','admin')),
+                sender_chat_id INTEGER,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(dispute_id) REFERENCES disputes(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_photos_date ON photos(date);
             CREATE INDEX IF NOT EXISTS idx_photos_receiver_status ON photos(receiver_chat_id, status);
             CREATE INDEX IF NOT EXISTS idx_photos_sender_status ON photos(sender_chat_id, status);
@@ -998,6 +1038,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_payment_tx_hashes_chat ON payment_tx_hashes(first_chat_id);
             CREATE INDEX IF NOT EXISTS idx_payout_requests_status ON payout_requests(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_disputes_status ON disputes(status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute ON dispute_messages(dispute_id, created_at);
             """
         )
         _migrate_db(conn)
@@ -2255,13 +2296,77 @@ def generate_dispute_ref(conn: sqlite3.Connection | None = None) -> str:
 def create_dispute(chat_id: int, public_id: str | None, message: str) -> str:
     user = get_user(chat_id)
     role = user.role if user else None
+    clean_message = message.strip()
+    created = now_iso()
     with get_conn() as conn:
         ref_id = generate_dispute_ref(conn)
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO disputes(ref_id, public_id, chat_id, role, message, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)",
-            (ref_id, public_id, chat_id, role, message.strip(), now_iso()),
+            (ref_id, public_id, chat_id, role, clean_message, created),
+        )
+        dispute_id = int(cur.lastrowid)
+        conn.execute(
+            "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, 'user', ?, ?, ?)",
+            (dispute_id, chat_id, clean_message, created),
         )
         return ref_id
+
+
+def get_dispute_by_id(dispute_id: int) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM disputes WHERE id = ?", (dispute_id,)).fetchone()
+
+
+def get_dispute_by_ref(ref_id: str) -> sqlite3.Row | None:
+    ref = str(ref_id or "").strip().upper().lstrip("#")
+    if not ref:
+        return None
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM disputes WHERE UPPER(ref_id) = ?", (ref,)).fetchone()
+
+
+def add_dispute_chat_message(dispute_id: int, sender_type: str, sender_chat_id: int | None, message: str) -> int:
+    clean_message = str(message or "").strip()
+    if not clean_message:
+        raise ValueError("message is empty")
+    if sender_type not in {"user", "admin"}:
+        raise ValueError("invalid dispute sender type")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, ?, ?, ?, ?)",
+            (dispute_id, sender_type, sender_chat_id, clean_message, now_iso()),
+        )
+        if sender_type == "admin":
+            conn.execute("UPDATE disputes SET status = 'under_review', admin_note = ? WHERE id = ? AND status IN ('open','under_review')", (clean_message, dispute_id))
+        elif sender_type == "user":
+            conn.execute("UPDATE disputes SET status = 'under_review' WHERE id = ? AND status IN ('open','under_review')", (dispute_id,))
+        return int(cur.lastrowid)
+
+
+def list_dispute_chat_messages(dispute_id: int) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM dispute_messages WHERE dispute_id = ? ORDER BY created_at ASC, id ASC", (dispute_id,)).fetchall()
+
+
+def dispute_chat_html(dispute_id: int) -> str:
+    messages = list_dispute_chat_messages(dispute_id)
+    if not messages:
+        return '<div class="muted">No chat messages yet.</div>'
+    out = ['<div class="dispute-chat-log">']
+    for msg in messages[-20:]:
+        side = 'Admin' if str(msg['sender_type']) == 'admin' else 'User'
+        cls = 'admin' if str(msg['sender_type']) == 'admin' else 'user'
+        out.append(
+            f'<div class="dispute-chat-bubble {cls}">'
+            f'<strong>{esc(side)}</strong>'
+            f'<span class="muted small"> · {esc(display_datetime(msg["created_at"]))}</span>'
+            f'<div>{esc(msg["message"])}</div>'
+            f'</div>'
+        )
+    if len(messages) > 20:
+        out.insert(1, f'<div class="muted small">Showing latest 20 of {len(messages)} messages.</div>')
+    out.append('</div>')
+    return ''.join(out)
 
 
 def pending_dispute_count() -> int:
@@ -5382,6 +5487,13 @@ def build_caption(date_str: str, daily_no: int, public_id: str) -> str:
     )
 
 
+def build_receiver_qr_caption(date_str: str, daily_no: int, public_id: str, expires_at: str | None = None) -> str:
+    lines = [build_caption(date_str, daily_no, public_id)]
+    if expires_at:
+        lines.extend(["", f"⏱ Expires: {display_datetime(expires_at)}"])
+    return "\n".join(lines)
+
+
 def build_status_caption(photo: PhotoRow, status: str, failure_reason: str | None = None) -> str:
     emoji = "✅" if status == "done" else "❌"
     status_text = status.upper()
@@ -5415,11 +5527,22 @@ def build_sender_offer_caption(
     return "\n".join(lines)
 
 
-async def edit_sender_offer_caption(bot, chat_id: int, message_id: int | None, caption: str) -> bool:
+async def edit_sender_offer_caption(
+    bot,
+    chat_id: int,
+    message_id: int | None,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> bool:
     if not message_id:
         return False
     try:
-        await bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption=caption)
+        await bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=caption,
+            reply_markup=reply_markup,
+        )
         return True
     except TelegramError as exc:
         logger.warning("Could not edit sender offer caption %s/%s: %s", chat_id, message_id, exc)
@@ -6150,6 +6273,7 @@ WALLET_TOPUP_FLOW: dict[int, dict] = {}
 MANUAL_TXHASH_FLOW: dict[int, dict] = {}
 WITHDRAW_FLOW: dict[int, dict] = {}
 DISPUTE_FLOW: dict[int, dict] = {}
+DISPUTE_REPLY_FLOW: dict[int, dict] = {}
 FAIL_REASON_FLOW: dict[int, dict] = {}
 FAIL_REASON_CHOICES: dict[str, str] = {
     "qr_not_working": "QR not working",
@@ -6872,6 +6996,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         MANUAL_TXHASH_FLOW.pop(chat_id, None)
         WITHDRAW_FLOW.pop(chat_id, None)
         DISPUTE_FLOW.pop(chat_id, None)
+        DISPUTE_REPLY_FLOW.pop(chat_id, None)
         FAIL_REASON_FLOW.pop(chat_id, None)
         await query.edit_message_text(
             main_menu_text(user, chat_id),
@@ -7164,6 +7289,9 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = update.message.text.strip()
     if chat_id in FAIL_REASON_FLOW:
         await update.message.reply_text("Please select one of the failure reason buttons.")
+        return
+    if chat_id in DISPUTE_REPLY_FLOW:
+        await submit_dispute_chat_reply(update.message, chat_id, text)
         return
     if chat_id in DISPUTE_FLOW:
         await submit_dispute_reason(update.message, chat_id, text)
@@ -7648,6 +7776,107 @@ async def submit_dispute_reason(message, chat_id: int, reason: str) -> None:
     public_id = state.get("public_id")
     ref_id = create_dispute(chat_id, public_id, reason)
     await message.reply_text(f"✅ Dispute #{ref_id} submitted. Admin will review it soon.")
+    await notify_admins_new_dispute(ref_id, chat_id, public_id, reason)
+
+
+async def notify_admins_new_dispute(ref_id: str, chat_id: int, public_id: str | None, message_text: str) -> None:
+    if telegram_application is None or not ADMIN_IDS:
+        return
+    qr_line = f"\nQR ID: {public_id}" if public_id else ""
+    text = f"⚠️ New dispute #{ref_id}{qr_line}\nFrom: {chat_id}\n\n{message_text}"
+    for admin_id in sorted(ADMIN_IDS):
+        try:
+            await telegram_application.bot.send_message(chat_id=admin_id, text=text, protect_content=PROTECT_CONTENT)
+        except TelegramError:
+            pass
+
+
+async def notify_admins_dispute_reply(row: sqlite3.Row, reply_text: str) -> None:
+    if telegram_application is None or not ADMIN_IDS:
+        return
+    ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
+    qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""
+    text = f"💬 New dispute reply #{ref}{qr_line}\nFrom: {row['chat_id']}\n\n{reply_text}"
+    for admin_id in sorted(ADMIN_IDS):
+        try:
+            await telegram_application.bot.send_message(chat_id=admin_id, text=text, protect_content=PROTECT_CONTENT)
+        except TelegramError:
+            pass
+
+
+async def dispute_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    data = query.data or ""
+    raw_id = data.split(":", 1)[1].strip() if ":" in data else ""
+    try:
+        dispute_id = int(raw_id)
+    except ValueError:
+        await query.answer("Dispute not found.", show_alert=True)
+        return
+    row = get_dispute_by_id(dispute_id)
+    chat_id = int(query.from_user.id)
+    if not row or int(row['chat_id']) != chat_id:
+        await query.answer("This dispute is not yours.", show_alert=True)
+        return
+    if str(row['status'] or '').lower() not in {'open', 'under_review'}:
+        await query.answer("This dispute is already closed.", show_alert=True)
+        return
+    ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
+    DISPUTE_REPLY_FLOW[chat_id] = {"dispute_id": int(row['id']), "ref": ref}
+    await query.answer()
+    await query.message.reply_text(
+        f"💬 Reply to dispute #{ref}\n\nSend your message now.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Cancel", callback_data="nav:home")]]),
+    )
+
+
+async def submit_dispute_chat_reply(message, chat_id: int, reply_text: str) -> None:
+    reply_text = str(reply_text or "").strip()
+    if reply_text.lower() in {"cancel", "/cancel"}:
+        DISPUTE_REPLY_FLOW.pop(chat_id, None)
+        await message.reply_text("Dispute reply cancelled.")
+        return
+    if len(reply_text) < 2:
+        await message.reply_text("Please send a clear reply.")
+        return
+    state = DISPUTE_REPLY_FLOW.pop(chat_id, {})
+    dispute_id = int(state.get("dispute_id") or 0)
+    row = get_dispute_by_id(dispute_id)
+    if not row or int(row['chat_id']) != int(chat_id):
+        await message.reply_text("Dispute not found.")
+        return
+    if str(row['status'] or '').lower() not in {'open', 'under_review'}:
+        await message.reply_text("This dispute is already closed.")
+        return
+    add_dispute_chat_message(dispute_id, "user", chat_id, reply_text)
+    ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
+    await message.reply_text(f"✅ Reply added to dispute #{ref}.")
+    await notify_admins_dispute_reply(row, reply_text)
+
+
+async def dispute_reply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    if not context.args:
+        await update.message.reply_text("Use: /disputereply DISPUTE_ID your message")
+        return
+    row = get_dispute_by_ref(context.args[0])
+    if not row or int(row['chat_id']) != int(chat_id):
+        await update.message.reply_text("Dispute not found.")
+        return
+    if str(row['status'] or '').lower() not in {'open', 'under_review'}:
+        await update.message.reply_text("This dispute is already closed.")
+        return
+    if len(context.args) == 1:
+        DISPUTE_REPLY_FLOW[chat_id] = {"dispute_id": int(row['id']), "ref": str(row['ref_id'] or '')}
+        await update.message.reply_text(f"💬 Send your reply for dispute #{row['ref_id']} now.")
+        return
+    reply_text = " ".join(context.args[1:]).strip()
+    DISPUTE_REPLY_FLOW[chat_id] = {"dispute_id": int(row['id']), "ref": str(row['ref_id'] or '')}
+    await submit_dispute_chat_reply(update.message, chat_id, reply_text)
 
 
 async def send_offer_to_receivers(context: ContextTypes.DEFAULT_TYPE, public_id: str) -> tuple[int, int]:
@@ -8099,7 +8328,12 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     assert row is not None
     receiver_message_id: int | None = None
-    accepted_caption = build_caption(row["date"], int(row["daily_no"]), public_id)
+    accepted_caption = build_receiver_qr_caption(
+        str(row["date"]),
+        int(row["daily_no"]),
+        public_id,
+        str(row["offer_expires_at"] or ""),
+    )
 
     await query.answer("✅ You got this QR", show_alert=False)
     # Edit the accepted offer message itself into the QR photo, so the receiver does not get a second QR message.
@@ -8153,10 +8387,11 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             str(row["date"]),
             int(row["daily_no"]),
             public_id,
-            "⏳ Your QR offer was accepted.",
+            "⏳ Your QR offer was accepted. Waiting for receiver update.",
             expires_at=str(row["offer_expires_at"] or ""),
             sender_rate=_dec(row["sender_rate_usdt"]),
         ),
+        reply_markup=sender_notify_keyboard(public_id),
     )
     if auto_off:
         await context.bot.send_message(
@@ -8164,6 +8399,60 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             text="🔴 Your scan limit reached zero, so you were set offline automatically. Use /on LIMIT to go online again.",
         )
         await notify_active_senders(context, "🔴 A receiver reached their limit and is now offline. Use /status for current capacity.")
+
+
+async def notify_receiver_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    try:
+        _action, public_id = (query.data or "").split(":", 1)
+    except Exception:
+        await query.answer("Invalid notify button.", show_alert=True)
+        return
+
+    sender_chat_id = query.message.chat.id
+    row = get_photo_record(public_id)
+    if not row:
+        await query.answer("QR not found.", show_alert=True)
+        return
+    if int(row["sender_chat_id"] or 0) != sender_chat_id:
+        await query.answer("Only the QR sender can notify the receiver.", show_alert=True)
+        return
+
+    status = str(row["status"] or "").lower()
+    offer_state = str(row["offer_state"] or "").lower()
+    receiver_chat_id = int(row["receiver_chat_id"] or 0)
+
+    if status != "pending":
+        await query.answer(f"This QR is already marked {status.upper()}.", show_alert=True)
+        return
+    if offer_state != "claimed" or receiver_chat_id <= 0:
+        await query.answer("No receiver has accepted this QR yet.", show_alert=True)
+        return
+    if row["offer_expires_at"] and str(row["offer_expires_at"]) <= now_iso():
+        expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
+        if expired_ok and expired_row is not None:
+            await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
+        await query.answer("This QR has expired.", show_alert=True)
+        return
+
+    try:
+        await context.bot.send_message(
+            chat_id=receiver_chat_id,
+            text=(
+                "🔔 Sender reminder\n"
+                f"🆔 QR ID: {public_id}\n"
+                f"⏱ Expires: {display_datetime(str(row['offer_expires_at'] or ''))}\n\n"
+                "Please complete this pending QR or mark it failed."
+            ),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📥 Open pending QR", callback_data=f"pendingqr:{public_id}")]]),
+            protect_content=PROTECT_CONTENT,
+        )
+        await query.answer("Receiver notified.", show_alert=False)
+    except TelegramError as exc:
+        logger.warning("Could not notify receiver %s for QR %s: %s", receiver_chat_id, public_id, exc)
+        await query.answer("Could not notify the receiver right now.", show_alert=True)
 
 
 async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -8197,7 +8486,12 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         msg = await context.bot.send_photo(
             chat_id=chat_id,
             photo=row["generated_file_id"],
-            caption=build_caption(row["date"], int(row["daily_no"]), public_id),
+            caption=build_receiver_qr_caption(
+                str(row["date"]),
+                int(row["daily_no"]),
+                public_id,
+                str(row["offer_expires_at"] or ""),
+            ),
             reply_markup=receiver_status_keyboard(public_id),
             protect_content=PROTECT_CONTENT,
         )
@@ -10884,7 +11178,8 @@ async def admin_disputes(request: Request):
     if not rows:
         body += '<p>No disputes in this view.</p>'
     else:
-        body += '<div class="table-wrap"><table><tr><th>ID</th><th>QR</th><th>User</th><th>Message</th><th>Status</th><th>Created</th><th>Action</th></tr>'
+        body += '<style>.dispute-chat-log{display:flex;flex-direction:column;gap:8px;min-width:280px;max-width:520px}.dispute-chat-bubble{padding:9px 11px;border-radius:12px;border:1px solid rgba(148,163,184,.25);background:rgba(15,23,42,.35)}.dispute-chat-bubble.admin{background:rgba(37,99,235,.16);border-color:rgba(96,165,250,.35)}.dispute-chat-bubble.user{background:rgba(22,163,74,.12);border-color:rgba(74,222,128,.28)}.dispute-chat-bubble div{white-space:pre-wrap;margin-top:4px}.small{font-size:12px}.dispute-actions{display:flex;gap:6px;flex-wrap:wrap}</style>'
+        body += '<div class="table-wrap"><table><tr><th>ID</th><th>QR</th><th>User</th><th>Chat</th><th>Status</th><th>Created</th><th>Action</th></tr>'
         for r in paged:
             user = get_admin_user_row(int(r['chat_id']))
             qr_public_id = str(r['public_id'] or '')
@@ -10901,6 +11196,11 @@ async def admin_disputes(request: Request):
                 )
             if status in {'open', 'under_review'}:
                 action_parts.append(
+                    f'<form class="inline dispute-message-form" method="post" action="/admin/disputes/{esc(r["id"])}/message" '
+                    f'data-mode="message" data-ref="{esc(ref)}" data-user="{esc(strip_tags(user_link(user)) if user else r["chat_id"])}" '
+                    f'data-qr="{esc(qr_public_id or "General")}"><button class="secondary" type="submit">💬 Message</button></form>'
+                )
+                action_parts.append(
                     f'<form class="inline dispute-message-form" method="post" action="/admin/disputes/{esc(r["id"])}/resolve" '
                     f'data-mode="resolve" data-ref="{esc(ref)}" data-user="{esc(strip_tags(user_link(user)) if user else r["chat_id"])}" '
                     f'data-qr="{esc(qr_public_id or "General")}"><button class="success" type="submit">Resolve</button></form>'
@@ -10910,13 +11210,11 @@ async def admin_disputes(request: Request):
                     f'data-mode="reject" data-ref="{esc(ref)}" data-user="{esc(strip_tags(user_link(user)) if user else r["chat_id"])}" '
                     f'data-qr="{esc(qr_public_id or "General")}"><button class="danger" type="submit">Reject</button></form>'
                 )
-            action = ' '.join(action_parts) if action_parts else '<span class="muted">No action</span>'
-            note = ''
-            if r['admin_note']:
-                note = f'<div class="muted" style="margin-top:6px;"><strong>Admin note:</strong> {esc(r["admin_note"])}</div>'
+            action = '<div class="dispute-actions">' + ' '.join(action_parts) + '</div>' if action_parts else '<span class="muted">No action</span>'
+            chat_html = dispute_chat_html(int(r['id']))
             body += (
                 f'<tr><td>#{esc(ref)}</td><td>{qr}</td><td>{user_link(user) if user else esc(r["chat_id"])}</td>'
-                f'<td>{esc(r["message"])}{note}</td><td>{dispute_status_pill(status)}</td><td>{esc(display_datetime(r["created_at"]))}</td><td>{action}</td></tr>'
+                f'<td>{chat_html}</td><td>{dispute_status_pill(status)}</td><td>{esc(display_datetime(r["created_at"]))}</td><td>{action}</td></tr>'
             )
         body += '</table></div>' + pager
     body += '</div>'
@@ -10924,11 +11222,11 @@ async def admin_disputes(request: Request):
     <div id="dispute-message-modal" class="confirm-modal-shell" hidden>
       <div class="confirm-modal-backdrop" data-close-dispute-message></div>
       <div class="confirm-modal-panel" role="dialog" aria-modal="true" aria-labelledby="dispute-message-title">
-        <h2 id="dispute-message-title">Update dispute</h2>
-        <p id="dispute-message-desc" class="confirm-modal-desc">Enter the message that should be sent to the disputer.</p>
+        <h2 id="dispute-message-title">Message dispute user</h2>
+        <p id="dispute-message-desc" class="confirm-modal-desc">Send a question or update before making the final decision.</p>
         <form id="dispute-message-submit-form" method="post" action="">
           <label>Message to disputer</label>
-          <textarea name="admin_note" required placeholder="Example: We reviewed your dispute and resolved it."></textarea>
+          <textarea name="admin_note" required placeholder="Ask a question or send an update."></textarea>
           <div class="confirm-actions">
             <button type="button" class="secondary" data-close-dispute-message>Cancel</button>
             <button type="submit" id="dispute-message-submit-button" class="success">Send</button>
@@ -10954,11 +11252,18 @@ async def admin_disputes(request: Request):
           const user = form.getAttribute('data-user') || '';
           const qr = form.getAttribute('data-qr') || '';
           submitForm.action = form.action;
-          if (title) title.textContent = mode === 'reject' ? 'Reject dispute?' : 'Resolve dispute?';
-          if (button) { button.textContent = mode === 'reject' ? 'Reject & Send' : 'Resolve & Send'; button.className = mode === 'reject' ? 'danger' : 'success'; }
+          if (title) title.textContent = mode === 'reject' ? 'Reject dispute?' : (mode === 'resolve' ? 'Resolve dispute?' : 'Message disputer');
+          if (button) {
+            button.textContent = mode === 'reject' ? 'Reject & Send' : (mode === 'resolve' ? 'Resolve & Send' : 'Send Message');
+            button.className = mode === 'reject' ? 'danger' : (mode === 'resolve' ? 'success' : 'secondary');
+          }
           if (desc) desc.textContent = 'Dispute #' + ref + ' · ' + user + ' · QR: ' + qr;
           const textarea = submitForm.querySelector('textarea[name="admin_note"]');
-          if (textarea) { textarea.value = ''; textarea.placeholder = mode === 'reject' ? 'Example: We reviewed your dispute, but could not approve it.' : 'Example: We reviewed your dispute and resolved it.'; textarea.focus(); }
+          if (textarea) {
+            textarea.value = '';
+            textarea.placeholder = mode === 'reject' ? 'Final rejection message.' : (mode === 'resolve' ? 'Final resolved message.' : 'Ask a question or send an update.');
+            textarea.focus();
+          }
           shell.hidden = false;
         });
       });
@@ -10969,14 +11274,42 @@ async def admin_disputes(request: Request):
     return render_page("Disputes", body, request)
 
 
-async def _notify_dispute_user(row: sqlite3.Row, text: str) -> bool:
+async def _notify_dispute_user(row: sqlite3.Row, text: str, reply_button: bool = False) -> bool:
     if telegram_application is None:
         return False
+    markup = None
+    if reply_button and str(row['status'] or '').lower() in {'open', 'under_review'}:
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Reply to admin", callback_data=f"disputereply:{int(row['id'])}")]])
     try:
-        await telegram_application.bot.send_message(chat_id=int(row['chat_id']), text=text, protect_content=PROTECT_CONTENT)
+        await telegram_application.bot.send_message(chat_id=int(row['chat_id']), text=text, reply_markup=markup, protect_content=PROTECT_CONTENT)
         return True
     except TelegramError:
         return False
+
+
+@web_app.post("/admin/disputes/{dispute_id}/message")
+async def admin_dispute_message(request: Request, dispute_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    admin_note = str(form.get("admin_note", "")).strip()
+    if not admin_note:
+        return redirect_with_msg("/admin/disputes", "Message cannot be empty.")
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM disputes WHERE id = ?", (dispute_id,)).fetchone()
+        if not row or str(row['status'] or '').lower() not in {'open', 'under_review'}:
+            return redirect_with_msg("/admin/disputes", "Dispute is already closed or not found.")
+        conn.execute(
+            "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, 'admin', NULL, ?, ?)",
+            (dispute_id, admin_note, now_iso()),
+        )
+        conn.execute("UPDATE disputes SET status = 'under_review', admin_note = ? WHERE id = ? AND status IN ('open','under_review')", (admin_note, dispute_id))
+        row = conn.execute("SELECT * FROM disputes WHERE id = ?", (dispute_id,)).fetchone()
+    ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
+    qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""
+    notified = await _notify_dispute_user(row, f"💬 Admin message for dispute #{ref}{qr_line}\n\n{admin_note}\n\nTap the button below to reply.", reply_button=True)
+    return redirect_with_msg("/admin/disputes", "Message sent to disputer." if notified else "Message saved, but Telegram notification failed.")
 
 
 @web_app.post("/admin/disputes/{dispute_id}/review")
@@ -11008,6 +11341,11 @@ async def admin_dispute_resolve(request: Request, dispute_id: int):
             "UPDATE disputes SET status = 'resolved', resolved_at = ?, admin_note = ? WHERE id = ? AND status IN ('open','under_review')",
             (now_iso(), admin_note, dispute_id),
         )
+        if cur.rowcount:
+            conn.execute(
+                "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, 'admin', NULL, ?, ?)",
+                (dispute_id, admin_note, now_iso()),
+            )
     if row and cur.rowcount:
         ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
         qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""
@@ -11029,6 +11367,11 @@ async def admin_dispute_reject(request: Request, dispute_id: int):
             "UPDATE disputes SET status = 'rejected', resolved_at = ?, admin_note = ? WHERE id = ? AND status IN ('open','under_review')",
             (now_iso(), admin_note, dispute_id),
         )
+        if cur.rowcount:
+            conn.execute(
+                "INSERT INTO dispute_messages(dispute_id, sender_type, sender_chat_id, message, created_at) VALUES (?, 'admin', NULL, ?, ?)",
+                (dispute_id, admin_note, now_iso()),
+            )
     if row and cur.rowcount:
         ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
         qr_line = f"\nQR ID: {row['public_id']}" if row['public_id'] else ""
@@ -11642,6 +11985,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
         ("history", "Show QR history"),
         ("stats", "Show your stats"),
         ("dispute", "Open a dispute"),
+        ("disputereply", "Reply to a dispute"),
     ]
     if role == "sender":
         return common + [
@@ -11706,6 +12050,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("earnings", earnings_cmd))
     app.add_handler(CommandHandler("withdraw", withdraw_cmd))
     app.add_handler(CommandHandler("dispute", dispute_cmd))
+    app.add_handler(CommandHandler("disputereply", dispute_reply_cmd))
     app.add_handler(CommandHandler("history", history_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("pending", pending_cmd))
@@ -11720,6 +12065,8 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(preset_reply_button, pattern=r"^msgreply:"))
     app.add_handler(CallbackQueryHandler(fail_reason_button, pattern=r"^failreason:"))
     app.add_handler(CallbackQueryHandler(dispute_qr_button, pattern=r"^disputeqr:"))
+    app.add_handler(CallbackQueryHandler(dispute_reply_button, pattern=r"^disputereply:"))
+    app.add_handler(CallbackQueryHandler(notify_receiver_button, pattern=r"^notify:"))
     app.add_handler(CallbackQueryHandler(check_payment_button, pattern=r"^checkpay:"))
     app.add_handler(CallbackQueryHandler(manual_payment_button, pattern=r"^manualpay:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_text_flow))
