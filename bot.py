@@ -1132,6 +1132,50 @@ def ensure_default_sender_user(chat_id: int) -> UserRow:
     return get_user(chat_id) or UserRow(chat_id=chat_id, role="sender", alias=None, active=True)
 
 
+def _user_search_terms(search: str | None) -> list[str]:
+    """Build forgiving search terms for admin user search.
+
+    Handles common admin inputs such as @username, username, full names,
+    Telegram IDs copied with spaces, and partial fragments.
+    """
+    raw = (search or "").strip().lower()
+    if not raw:
+        return []
+    candidates: list[str] = [raw]
+
+    no_at = raw.lstrip("@").strip()
+    if no_at and no_at != raw:
+        candidates.append(no_at)
+
+    compact = re.sub(r"[\s@+()\-_.]+", "", raw)
+    if compact and compact != raw:
+        candidates.append(compact)
+
+    digits = re.sub(r"\D+", "", raw)
+    if len(digits) >= 3:
+        candidates.append(digits)
+
+    # Also match individual words/tokens so searching "@user", "first last",
+    # or copied labels like "ID: 123456" still works.
+    for token in re.split(r"[\s,;:/|]+", raw):
+        token = token.strip().lstrip("@").strip()
+        if token:
+            candidates.append(token)
+            token_digits = re.sub(r"\D+", "", token)
+            if len(token_digits) >= 3:
+                candidates.append(token_digits)
+
+    seen: set[str] = set()
+    terms: list[str] = []
+    for item in candidates:
+        item = item.strip().lower()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        terms.append(item)
+    return terms[:12]
+
+
 def list_users(
     role: str | None = None,
     limit: int = 100,
@@ -1140,9 +1184,26 @@ def list_users(
 ) -> list[sqlite3.Row]:
     with get_conn() as conn:
         base = """
-            SELECT u.*, p.username, p.first_name, p.last_name, p.last_seen_at
+            SELECT
+                u.*,
+                p.username,
+                p.first_name,
+                p.last_name,
+                p.last_seen_at,
+                COALESCE(w.balance_usdt, 0) AS wallet_balance_usdt,
+                COALESCE(w.reserved_usdt, 0) AS wallet_reserved_usdt,
+                COALESCE(w.earned_usdt, 0) AS wallet_earned_usdt,
+                COALESCE(w.paid_usdt, 0) AS wallet_paid_usdt,
+                COALESCE(pr.pending_payout_usdt, 0) AS wallet_pending_payout_usdt
             FROM users u
             LEFT JOIN telegram_profiles p ON p.chat_id = u.chat_id
+            LEFT JOIN wallets w ON w.chat_id = u.chat_id
+            LEFT JOIN (
+                SELECT receiver_chat_id, COALESCE(SUM(amount_usdt), 0) AS pending_payout_usdt
+                FROM payout_requests
+                WHERE status = 'pending'
+                GROUP BY receiver_chat_id
+            ) pr ON pr.receiver_chat_id = u.chat_id
         """
         where: list[str] = []
         params: list[object] = []
@@ -1155,21 +1216,25 @@ def list_users(
             where.append("u.active = ?")
             params.append(1 if active else 0)
 
-        q = (search or "").strip()
-        if q:
-            like = f"%{q.lower()}%"
-            where.append(
-                "("
-                "LOWER(CAST(u.chat_id AS TEXT)) LIKE ? OR "
-                "LOWER(COALESCE(u.alias, '')) LIKE ? OR "
-                "LOWER(COALESCE(u.role, '')) LIKE ? OR "
-                "LOWER(COALESCE(p.username, '')) LIKE ? OR "
-                "LOWER(COALESCE(p.first_name, '')) LIKE ? OR "
-                "LOWER(COALESCE(p.last_name, '')) LIKE ? OR "
-                "LOWER(COALESCE(p.first_name, '') || ' ' || COALESCE(p.last_name, '')) LIKE ?"
-                ")"
-            )
-            params.extend([like, like, like, like, like, like, like])
+        terms = _user_search_terms(search)
+        if terms:
+            term_clauses: list[str] = []
+            searchable_fields = [
+                "LOWER(CAST(u.chat_id AS TEXT))",
+                "LOWER(COALESCE(u.alias, ''))",
+                "LOWER(COALESCE(u.role, ''))",
+                "LOWER(COALESCE(p.username, ''))",
+                "LOWER('@' || COALESCE(p.username, ''))",
+                "LOWER(COALESCE(p.first_name, ''))",
+                "LOWER(COALESCE(p.last_name, ''))",
+                "LOWER(TRIM(COALESCE(p.first_name, '') || ' ' || COALESCE(p.last_name, '')))",
+                "LOWER(TRIM(COALESCE(p.last_name, '') || ' ' || COALESCE(p.first_name, '')))",
+            ]
+            for term in terms:
+                like = f"%{term}%"
+                term_clauses.append("(" + " OR ".join(f"{field} LIKE ?" for field in searchable_fields) + ")")
+                params.extend([like] * len(searchable_fields))
+            where.append("(" + " OR ".join(term_clauses) + ")")
 
         sql = base
         if where:
@@ -4406,6 +4471,47 @@ def add_message_reply(template_id: int, audience: str, button_text: str, reply_t
         return int(cur.lastrowid)
 
 
+def update_message_template(template_id: int, audience: str, button_text: str, message_text: str) -> bool:
+    audience = _normalize_audience(audience)
+    button_text = _validate_button_text(button_text)
+    message_text = _validate_preset_text(message_text, "message")
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE message_templates
+            SET audience = ?, button_text = ?, message_text = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (audience, button_text, message_text, now_iso(), template_id),
+        )
+        return cur.rowcount > 0
+
+
+def update_message_reply(reply_id: int, audience: str, button_text: str, reply_text: str) -> bool:
+    audience = _normalize_audience(audience)
+    button_text = _validate_button_text(button_text)
+    reply_text = _validate_preset_text(reply_text, "reply")
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE message_replies
+            SET audience = ?, button_text = ?, reply_text = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (audience, button_text, reply_text, now_iso(), reply_id),
+        )
+        return cur.rowcount > 0
+
+
+def _audience_options_html(selected: str) -> str:
+    labels = {"sender": "Sender", "receiver": "Receiver / Buyer", "both": "Both"}
+    selected = str(selected or "").strip().lower()
+    return "".join(
+        f'<option value="{esc(value)}" {"selected" if value == selected else ""}>{esc(label)}</option>'
+        for value, label in labels.items()
+    )
+
+
 def set_message_template_active(template_id: int, active: bool) -> bool:
     with get_conn() as conn:
         cur = conn.execute(
@@ -4914,7 +5020,12 @@ def _validate_upi_autopay_mandate(data: str) -> None:
     if _first_param(params, "cu").upper() != "INR":
         raise ValueError("Only INR UPI mandate QR codes are allowed.")
 
-    if _first_param(params, "txntype").upper() != "CREATE":
+    txn_type = _first_param(params, "txntype").upper()
+    # PSPs normally send txnType=CREATE. Some decoders/PSP variants may expose
+    # the creation value in shortened form while still representing a mandate
+    # creation QR, so allow CREATE and CRE instead of rejecting valid Stripe/Cashfree
+    # UPI mandate QRs too aggressively.
+    if txn_type not in {"CREATE", "CRE"}:
         raise ValueError("Only UPI mandate creation QR codes are allowed.")
 
     purpose = _first_param(params, "purpose").upper()
@@ -5009,6 +5120,55 @@ def _decode_with_detector(detector: cv2.QRCodeDetector, image: np.ndarray) -> st
     return None
 
 
+def _add_qr_decode_attempt(attempts: list[np.ndarray], image: np.ndarray) -> None:
+    """Add a decode attempt while avoiding exact duplicate object references."""
+    if image is None:
+        return
+    attempts.append(image)
+
+
+def _add_upscaled_qr_attempts(attempts: list[np.ndarray], image: np.ndarray) -> None:
+    """
+    Add enlarged attempts for screenshots where the QR is small on the page.
+
+    Stripe/Cashfree UPI mandate pages often show a valid mandate QR in the
+    middle of a full phone screenshot. OpenCV may detect the QR corners at the
+    original size but fail to decode the payload until the image is enlarged.
+    These attempts keep real mandate screenshots from being rejected as unreadable.
+    """
+    try:
+        height, width = image.shape[:2]
+    except Exception:
+        return
+    largest = max(width, height)
+    if largest <= 0:
+        return
+
+    # Do not create huge images for already-large uploads. These targets are
+    # enough for small phone screenshots while staying safe for Railway memory.
+    for target_largest in (2200, 3200):
+        if largest >= target_largest:
+            continue
+        scale = target_largest / largest
+        if scale <= 1.05:
+            continue
+        try:
+            upscaled = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+            attempts.append(upscaled)
+            if len(upscaled.shape) == 3:
+                gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = upscaled
+            attempts.append(gray)
+            try:
+                _threshold, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                attempts.append(binary)
+            except Exception:
+                pass
+        except Exception:
+            continue
+
+
 def decode_qr_data_from_bytes(image_bytes: bytes) -> str:
     np_bytes = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(np_bytes, cv2.IMREAD_COLOR)
@@ -5017,26 +5177,43 @@ def decode_qr_data_from_bytes(image_bytes: bytes) -> str:
 
     detector = cv2.QRCodeDetector()
     resized = resize_for_fast_qr_detection(image)
-    attempts: list[np.ndarray] = [resized]
+    attempts: list[np.ndarray] = []
 
+    _add_qr_decode_attempt(attempts, resized)
     try:
         gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-        attempts.append(gray)
+        _add_qr_decode_attempt(attempts, gray)
     except Exception:
         pass
 
+    # If the original upload was reduced for speed, also try the original.
     if resized.shape[:2] != image.shape[:2]:
-        attempts.append(image)
+        _add_qr_decode_attempt(attempts, image)
+
+    # Important for Stripe/Cashfree mandate screenshots: the QR can be small
+    # compared with the full screenshot, so upscaling is required to decode it.
+    _add_upscaled_qr_attempts(attempts, resized)
+    if resized.shape[:2] != image.shape[:2]:
+        _add_upscaled_qr_attempts(attempts, image)
 
     last_error: ValueError | None = None
     for attempt in attempts:
         try:
             data = _decode_with_detector(detector, attempt)
         except ValueError as exc:
+            # Multiple readable QR codes is a hard rejection. Other attempts
+            # cannot safely decide which QR the sender intended.
             last_error = exc
             break
-        if data:
+        if not data:
+            continue
+        try:
             return validate_qr_data(data)
+        except ValueError as exc:
+            # A low-resolution decode can sometimes be incomplete or malformed.
+            # Keep trying larger/cleaner attempts before rejecting the QR.
+            last_error = exc
+            continue
 
     if last_error:
         raise last_error
@@ -9396,10 +9573,67 @@ async def admin_users(request: Request):
     active = True if status_filter == "active" else False if status_filter == "disabled" else None
 
     users = list_users(role=role, active=active, search=q, limit=10000 if q or role or active is not None else 500)
-    paged_users, pager_html = paginate_items(users, request)
+    sender_users = [u for u in users if str(u["role"] or "").lower() == "sender"]
+    receiver_users = [u for u in users if str(u["role"] or "").lower() == "receiver"]
 
     def selected(value: str, current: str) -> str:
         return " selected" if value == current else ""
+
+    def user_full_name(u: sqlite3.Row) -> str:
+        return " ".join([str(u["first_name"] or "").strip(), str(u["last_name"] or "").strip()]).strip()
+
+    def sender_wallet_html(u: sqlite3.Row) -> str:
+        total = _dec(u["wallet_balance_usdt"] if "wallet_balance_usdt" in u.keys() else 0)
+        reserved = _dec(u["wallet_reserved_usdt"] if "wallet_reserved_usdt" in u.keys() else 0)
+        available = max(Decimal("0"), total - reserved)
+        html = f'<strong>${esc(_money(available))} USDT</strong>'
+        if reserved > 0:
+            html += f'<br><span class="muted small">Reserved: ${esc(_money(reserved))}</span>'
+        return html
+
+    def receiver_earnings_html(u: sqlite3.Row) -> str:
+        earned = _dec(u["wallet_earned_usdt"] if "wallet_earned_usdt" in u.keys() else 0)
+        paid = _dec(u["wallet_paid_usdt"] if "wallet_paid_usdt" in u.keys() else 0)
+        pending = _dec(u["wallet_pending_payout_usdt"] if "wallet_pending_payout_usdt" in u.keys() else 0)
+        due = max(Decimal("0"), earned - paid)
+        available = max(Decimal("0"), due - pending)
+        html = f'<strong>${esc(_money(available))} USDT</strong>'
+        if pending > 0:
+            html += f'<br><span class="muted small">Pending payout: ${esc(_money(pending))}</span>'
+        return html
+
+    def user_actions_html(u: sqlite3.Row) -> str:
+        next_state = "off" if u["active"] else "on"
+        action_label = "Disable" if u["active"] else "Enable"
+        btn_class = "danger" if u["active"] else "secondary"
+        return (
+            f'<form class="inline" method="post" action="/admin/users/active">'
+            f'<input type="hidden" name="chat_id" value="{esc(u["chat_id"])}">'
+            f'<input type="hidden" name="state" value="{next_state}">'
+            f'<button class="{btn_class}" type="submit">{action_label}</button>'
+            f'</form>'
+        )
+
+    def render_user_section(title: str, rows: list[sqlite3.Row], balance_header: str, balance_renderer, page_key: str) -> str:
+        if not rows:
+            return f'<div class="card"><h3>{esc(title)} <span class="muted small">(0)</span></h3><p>No users found in this section.</p></div>'
+        paged_rows, pager_html = paginate_items(rows, request, key=page_key)
+        html = f'<div class="card"><h3>{esc(title)} <span class="muted small">({esc(len(rows))})</span></h3>'
+        html += '<div class="table-wrap"><table><tr><th>ID/Username</th><th>Alias</th><th>Name</th>'
+        html += f'<th>{esc(balance_header)}</th><th class="cell-center">Status</th><th class="cell-center">Actions</th></tr>'
+        for u in paged_rows:
+            full_name = user_full_name(u)
+            html += f"""
+            <tr>
+              <td>{user_link(u)}</td>
+              <td>{esc(u['alias'] or '')}</td>
+              <td>{esc(full_name or '—')}</td>
+              <td>{balance_renderer(u)}</td>
+              <td class="cell-center">{badge(bool(u['active']))}</td>
+              <td class="cell-center">{user_actions_html(u)}</td>
+            </tr>"""
+        html += '</table></div>' + pager_html + '</div>'
+        return html
 
     body = (
         '<div class="card"><h2>👥 Users</h2>'
@@ -9438,33 +9672,20 @@ async def admin_users(request: Request):
         '</div>'
     )
 
-    body += '<div class="card"><h3>Registered users</h3>'
     if q or role is not None or active is not None:
-        body += f'<p class="muted small">Showing {esc(len(users))} matching user(s).</p>'
+        body += f'<div class="card"><p class="muted small">Showing {esc(len(users))} matching user(s): {esc(len(sender_users))} sender(s), {esc(len(receiver_users))} receiver(s).</p></div>'
 
     if not users:
         if q or role is not None or active is not None:
-            body += '<p>No users matched your search/filter.</p>'
+            body += '<div class="card"><p>No users matched your search/filter.</p></div>'
         else:
-            body += '<p>No users yet. Ask users to send <code>/myid</code> to the bot, then add their ID/Username here.</p>'
+            body += '<div class="card"><p>No users yet. Ask users to send <code>/myid</code> to the bot, then add their ID/Username here.</p></div>'
     else:
-        body += '<div class="table-wrap"><table><tr><th>Role</th><th>ID/Username</th><th>Alias</th><th>Name</th><th class="cell-center">Status</th><th class="cell-center">Actions</th></tr>'
-        for u in paged_users:
-            next_state = 'off' if u['active'] else 'on'
-            action_label = 'Disable' if u['active'] else 'Enable'
-            btn_class = 'danger' if u['active'] else 'secondary'
-            full_name = " ".join([str(u["first_name"] or "").strip(), str(u["last_name"] or "").strip()]).strip()
-            body += f'''
-            <tr>
-              <td>{esc(u['role'])}</td>
-              <td>{user_link(u)}</td>
-              <td>{esc(u['alias'] or '')}</td>
-              <td>{esc(full_name or '—')}</td>
-              <td class="cell-center">{badge(bool(u['active']))}</td>
-              <td class="cell-center"><form class="inline" method="post" action="/admin/users/active"><input type="hidden" name="chat_id" value="{esc(u['chat_id'])}"><input type="hidden" name="state" value="{next_state}"><button class="{btn_class}" type="submit">{action_label}</button></form></td>
-            </tr>'''
-        body += '</table></div>' + pager_html
-    body += '</div>'
+        if role_filter in {"all", "sender"}:
+            body += render_user_section("📤 Senders", sender_users, "Wallet balance", sender_wallet_html, "sender_page")
+        if role_filter in {"all", "receiver"}:
+            body += render_user_section("📥 Receivers", receiver_users, "Earnings balance", receiver_earnings_html, "receiver_page")
+
     return render_page("Users", body, request)
 
 
@@ -10772,7 +10993,8 @@ async def admin_messages(request: Request):
     else:
         body += '<div class="message-list">'
         for t in paged_templates:
-            delete_msg_form = f'<form class="inline" method="post" action="/admin/messages/delmsg"><input type="hidden" name="message_id" value="{esc(t["id"])}"><button class="danger" type="submit">Delete message</button></form>'
+            edit_msg_link = f'<a class="btn secondary" href="/admin/messages/{esc(t["id"])}/edit">✏️ Edit</a>'
+            delete_msg_form = f'<form class="inline" method="post" action="/admin/messages/delmsg"><input type="hidden" name="message_id" value="{esc(t["id"])}"><button class="danger" type="submit">Delete</button></form>'
             body += f'''
             <div class="message-card">
               <div class="message-head">
@@ -10780,21 +11002,22 @@ async def admin_messages(request: Request):
                 <div><span class="muted small">Audience</span><div>{esc(t["audience"])}</div></div>
                 <div><span class="muted small">Button</span><div class="message-button">{esc(t["button_text"])}</div></div>
                 <div><span class="muted small">Message</span><div class="message-text">{esc(t["message_text"])}</div><div class="muted small">Created: {esc(display_datetime(t["created_at"]))}</div></div>
-                <div>{delete_msg_form}</div>
+                <div class="button-row">{edit_msg_link}{delete_msg_form}</div>
               </div>
             '''
             replies = replies_by_template.get(int(t["id"]), [])
             if replies:
                 body += '<div class="reply-list">'
                 for r in replies:
-                    delete_reply_form = f'<form class="inline" method="post" action="/admin/messages/delreply"><input type="hidden" name="reply_id" value="{esc(r["id"])}"><button class="danger" type="submit">Delete reply</button></form>'
+                    edit_reply_link = f'<a class="btn secondary" href="/admin/messages/replies/{esc(r["id"])}/edit">✏️ Edit</a>'
+                    delete_reply_form = f'<form class="inline" method="post" action="/admin/messages/delreply"><input type="hidden" name="reply_id" value="{esc(r["id"])}"><button class="danger" type="submit">Delete</button></form>'
                     body += f'''
                     <div class="reply-card">
                       <div><span class="muted small">Reply ID</span><div class="message-id">#{esc(r["id"])}</div></div>
                       <div><span class="muted small">Audience</span><div>{esc(r["audience"])}</div></div>
                       <div><span class="muted small">Button</span><div class="message-button">{esc(r["button_text"])}</div></div>
                       <div><span class="muted small">Reply text</span><div class="message-text">{esc(r["reply_text"])}</div><div class="muted small">Created: {esc(display_datetime(r["created_at"]))}</div></div>
-                      <div>{delete_reply_form}</div>
+                      <div class="button-row">{edit_reply_link}{delete_reply_form}</div>
                     </div>
                     '''
                 body += '</div>'
@@ -10804,6 +11027,101 @@ async def admin_messages(request: Request):
         body += '</div>' + templates_pager
     body += '</div>'
     return render_page("Preset Messages", body, request)
+
+
+@web_app.get("/admin/messages/{message_id}/edit", response_class=HTMLResponse)
+async def admin_messages_edit_page(request: Request, message_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    template = get_message_template(message_id)
+    if not template:
+        return render_page("Edit Preset Message", '<div class="card"><p>Message not found.</p><a class="btn" href="/admin/messages">← Back</a></div>', request)
+    body = f'''
+    <div class="card"><h2>✏️ Edit preset message #{esc(template["id"])}</h2>
+      <form method="post" action="/admin/messages/{esc(template["id"])}/edit">
+        <div class="row">
+          <div><label>Who can send it?</label><select name="audience">{_audience_options_html(str(template["audience"] or ""))}</select></div>
+          <div><label>Button text</label><input name="button_text" required value="{esc(template["button_text"])}"></div>
+        </div>
+        <label>Message text delivered</label><textarea name="message_text" required>{esc(template["message_text"])}</textarea>
+        <div class="button-row">
+          <button type="submit">💾 Save message</button>
+          <a class="btn secondary" href="/admin/messages">Cancel</a>
+        </div>
+      </form>
+    </div>
+    <div class="card"><p class="muted small">Editing this preset only changes future broadcasts. Already-sent marketplace messages are not changed.</p></div>
+    '''
+    return render_page("Edit Preset Message", body, request)
+
+
+@web_app.post("/admin/messages/{message_id}/edit")
+async def admin_messages_edit_save(request: Request, message_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    try:
+        ok = update_message_template(
+            message_id,
+            str(form.get("audience", "")),
+            str(form.get("button_text", "")),
+            str(form.get("message_text", "")),
+        )
+    except Exception as exc:
+        return redirect_with_msg(f"/admin/messages/{message_id}/edit", f"Could not save message: {exc}")
+    return redirect_with_msg("/admin/messages", "Message updated." if ok else "Message not found.")
+
+
+@web_app.get("/admin/messages/replies/{reply_id}/edit", response_class=HTMLResponse)
+async def admin_message_reply_edit_page(request: Request, reply_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    reply = get_message_reply(reply_id)
+    if not reply:
+        return render_page("Edit Preset Reply", '<div class="card"><p>Reply not found.</p><a class="btn" href="/admin/messages">← Back</a></div>', request)
+    template = get_message_template(int(reply["template_id"]))
+    parent_label = f'#{esc(reply["template_id"])}'
+    if template:
+        parent_label += f' — {esc(template["button_text"])}'
+    body = f'''
+    <div class="card"><h2>✏️ Edit reply button #{esc(reply["id"])}</h2>
+      <p class="muted">Parent message: {parent_label}</p>
+      <form method="post" action="/admin/messages/replies/{esc(reply["id"])}/edit">
+        <div class="row">
+          <div><label>Who can reply?</label><select name="audience">{_audience_options_html(str(reply["audience"] or ""))}</select></div>
+          <div><label>Reply button</label><input name="button_text" required value="{esc(reply["button_text"])}"></div>
+        </div>
+        <label>Reply text delivered back</label><textarea name="reply_text" required>{esc(reply["reply_text"])}</textarea>
+        <div class="button-row">
+          <button type="submit">💾 Save reply</button>
+          <a class="btn secondary" href="/admin/messages">Cancel</a>
+        </div>
+      </form>
+    </div>
+    <div class="card"><p class="muted small">Editing this reply button only affects future broadcasts and future button menus.</p></div>
+    '''
+    return render_page("Edit Preset Reply", body, request)
+
+
+@web_app.post("/admin/messages/replies/{reply_id}/edit")
+async def admin_message_reply_edit_save(request: Request, reply_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    try:
+        ok = update_message_reply(
+            reply_id,
+            str(form.get("audience", "")),
+            str(form.get("button_text", "")),
+            str(form.get("reply_text", "")),
+        )
+    except Exception as exc:
+        return redirect_with_msg(f"/admin/messages/replies/{reply_id}/edit", f"Could not save reply: {exc}")
+    return redirect_with_msg("/admin/messages", "Reply updated." if ok else "Reply not found.")
 
 
 @web_app.get("/admin/messages/export")
