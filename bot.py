@@ -784,6 +784,201 @@ for _code in SUPPORTED_LANGUAGES:
         _TRANSLATIONS[_code].setdefault(_k, _v)
 
 
+_ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "stats_sender_title": "Your sender stats",
+        "stats_receiver_title": "Your receiver stats",
+        "stats_today": "📅 Today — {date}",
+        "stats_lifetime": "🏁 Lifetime",
+        "stats_total": "Total",
+        "stats_pending": "Pending",
+        "stats_done": "Done",
+        "stats_failed": "Failed",
+        "caption_date": "Date",
+        "caption_photo_today": "Photo #{daily_no} today",
+        "caption_id": "ID",
+        "caption_expires": "Expires",
+        "caption_time_left": "Time left",
+        "caption_reserved": "Reserved",
+        "caption_status": "Status",
+        "caption_updated": "Updated",
+        "caption_reason": "Reason",
+        "caption_sender_reserve_released": "Sender reserve released.",
+        "btn_accept_scan": "✅ Accept Scan",
+        "btn_done": "✅ Done",
+        "btn_failed": "❌ Failed",
+        "btn_notify_receiver": "🔔 Notify Receiver",
+        "btn_open_pending_qr": "📥 Open pending QR",
+        "btn_cancel": "⬅️ Cancel",
+        "offer_new": "📥 New QR scan available",
+        "offer_id": "Offer ID",
+        "offer_tap_to_claim": "Tap Accept Scan to claim it. The QR will be sent only if you win the claim.",
+        "sender_offer_created": "📡 Marketplace offer created.",
+        "sender_offer_sent": "📡 Offer sent to online receiver(s)",
+        "sender_offer_accepted": "⏳ Your QR offer was accepted. Waiting for receiver update.",
+        "offer_failed_no_receiver": "❌ Offer failed. No online receiver could be notified. Reserved balance was released.",
+        "receiver_qr_timer_hint": "Please mark Done or Failed before this QR expires.",
+        "receiver_expiry_warning": "⚠️ This QR will expire in about {time_left}. Please mark Done or Failed before expiry.",
+        "receiver_time_left_line": "⏳ Time left: {time_left}",
+        "time_expired": "expired",
+        "time_seconds": "{seconds}s",
+        "time_minutes_seconds": "{minutes}m {seconds}s",
+        "status_expired_caps": "EXPIRED",
+        "status_expired_by_admin_caps": "EXPIRED BY ADMIN",
+        "expired_offer_text": "⏱ Offer expired.\n🆔 Offer ID: {public_id}\nThis QR can no longer be accepted or completed.",
+        "expired_caption_status_line": "⏱ Status: EXPIRED",
+        "qr_marked_failed": "❌ QR marked failed",
+        "select_failure_reason": "❌ Select failure reason.\n🆔 ID: {public_id}",
+        "select_failure_reason_alert": "Select failure reason.",
+        "marked_failed_alert": "Marked failed.",
+        "fail_reason_qr_not_working": "❌ QR not working",
+        "fail_reason_qr_expired": "⏱ QR expired",
+        "fail_reason_limit_over": "🚫 My limit is over",
+        "only_active_sender_photos": "Only an active registered sender can send QR photos.",
+        "maintenance_paused": "🚧 Maintenance mode is ON. New QR submissions are paused by admin.",
+        "no_receiver_online": "No receiver is online right now. Use /status to check capacity before sending.",
+        "insufficient_wallet": "Insufficient wallet balance. Required per scan: ${required} USDT.\nAvailable: ${available} USDT.\n\nUse /wallet and /loadwallet to add balance.",
+        "photo_rejected_clear_qr": "Photo rejected: {error}\n\nSend a clear photo containing exactly one readable QR code. Captions/text are ignored.",
+        "photo_rejected_process": "Photo rejected: I could not process that QR image.",
+        "clean_qr_send_failed": "I generated the clean QR, but could not save/send it back to you. Please try again.",
+        "send_photo_not_document": "Please send the QR as a Telegram photo, not as a document. Photos are faster to process.",
+        "auto_off_limit_zero": "🔴 Your scan limit reached zero, so you were set offline automatically. Use /on LIMIT to go online again.",
+        "sender_notify_limit_zero": "🔴 A receiver reached their limit and is now offline. Use /status for current capacity.",
+        "sender_reminder": "🔔 Sender reminder\n🆔 QR ID: {public_id}\n⏱ Expires: {expires}\n⏳ Time left: {time_left}\n\nPlease complete this pending QR or mark it failed.",
+        "receiver_notified": "Receiver notified.",
+        "qr_opened_below": "QR opened below.",
+        "qr_expired_alert": "This QR has expired.",
+    },
+    "id": {
+        "stats_sender_title": "Statistik pengirim Anda", "stats_receiver_title": "Statistik penerima Anda", "stats_today": "📅 Hari ini — {date}", "stats_lifetime": "🏁 Sepanjang waktu", "stats_total": "Total", "stats_pending": "Tertunda", "stats_done": "Selesai", "stats_failed": "Gagal",
+        "caption_date": "Tanggal", "caption_photo_today": "Foto #{daily_no} hari ini", "caption_id": "ID", "caption_expires": "Kedaluwarsa", "caption_time_left": "Sisa waktu", "caption_reserved": "Direservasi", "caption_status": "Status", "caption_updated": "Diperbarui", "caption_reason": "Alasan", "caption_sender_reserve_released": "Saldo pengirim yang direservasi telah dilepaskan.",
+        "btn_accept_scan": "✅ Terima Scan", "btn_done": "✅ Selesai", "btn_failed": "❌ Gagal", "btn_notify_receiver": "🔔 Beri tahu penerima", "btn_open_pending_qr": "📥 Buka QR tertunda", "btn_cancel": "⬅️ Batal",
+        "offer_new": "📥 Scan QR baru tersedia", "offer_id": "ID Penawaran", "offer_tap_to_claim": "Ketuk Terima Scan untuk mengambilnya. QR hanya akan dikirim jika Anda berhasil mendapatkannya.",
+        "sender_offer_created": "📡 Penawaran marketplace dibuat.", "sender_offer_sent": "📡 Penawaran dikirim ke penerima online", "sender_offer_accepted": "⏳ Penawaran QR Anda diterima. Menunggu pembaruan dari penerima.", "offer_failed_no_receiver": "❌ Penawaran gagal. Tidak ada penerima online yang dapat diberi tahu. Saldo yang direservasi telah dilepaskan.",
+        "receiver_qr_timer_hint": "Harap tandai Selesai atau Gagal sebelum QR ini kedaluwarsa.", "receiver_expiry_warning": "⚠️ QR ini akan kedaluwarsa sekitar {time_left}. Harap tandai Selesai atau Gagal sebelum kedaluwarsa.", "receiver_time_left_line": "⏳ Sisa waktu: {time_left}",
+        "time_expired": "kedaluwarsa", "time_seconds": "{seconds} dtk", "time_minutes_seconds": "{minutes} mnt {seconds} dtk", "status_expired_caps": "KEDALUWARSA", "status_expired_by_admin_caps": "DIKEDALUWARSAKAN ADMIN",
+        "expired_offer_text": "⏱ Penawaran kedaluwarsa.\n🆔 ID Penawaran: {public_id}\nQR ini tidak dapat diterima atau diselesaikan lagi.", "expired_caption_status_line": "⏱ Status: KEDALUWARSA",
+        "qr_marked_failed": "❌ QR ditandai gagal", "select_failure_reason": "❌ Pilih alasan kegagalan.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Pilih alasan kegagalan.", "marked_failed_alert": "Ditandai gagal.",
+        "fail_reason_qr_not_working": "❌ QR tidak berfungsi", "fail_reason_qr_expired": "⏱ QR kedaluwarsa", "fail_reason_limit_over": "🚫 Limit saya habis",
+        "only_active_sender_photos": "Hanya pengirim terdaftar yang aktif yang dapat mengirim foto QR.", "maintenance_paused": "🚧 Mode pemeliharaan AKTIF. Pengiriman QR baru dijeda oleh admin.", "no_receiver_online": "Tidak ada penerima yang online saat ini. Gunakan /status untuk memeriksa kapasitas sebelum mengirim.",
+        "insufficient_wallet": "Saldo wallet tidak cukup. Diperlukan per scan: ${required} USDT.\nTersedia: ${available} USDT.\n\nGunakan /wallet dan /loadwallet untuk menambah saldo.",
+        "photo_rejected_clear_qr": "Foto ditolak: {error}\n\nKirim foto yang jelas berisi tepat satu kode QR yang dapat dibaca. Caption/teks diabaikan.", "photo_rejected_process": "Foto ditolak: saya tidak dapat memproses gambar QR tersebut.", "clean_qr_send_failed": "Saya sudah membuat QR bersih, tetapi tidak dapat menyimpan/mengirimkannya kepada Anda. Silakan coba lagi.", "send_photo_not_document": "Harap kirim QR sebagai foto Telegram, bukan sebagai dokumen. Foto lebih cepat diproses.",
+        "auto_off_limit_zero": "🔴 Limit scan Anda mencapai nol, jadi Anda otomatis dibuat offline. Gunakan /on LIMIT untuk online lagi.", "sender_notify_limit_zero": "🔴 Seorang penerima mencapai limit dan sekarang offline. Gunakan /status untuk kapasitas saat ini.",
+        "sender_reminder": "🔔 Pengingat dari pengirim\n🆔 ID QR: {public_id}\n⏱ Kedaluwarsa: {expires}\n⏳ Sisa waktu: {time_left}\n\nHarap selesaikan QR tertunda ini atau tandai gagal.", "receiver_notified": "Penerima diberi tahu.", "qr_opened_below": "QR dibuka di bawah.", "qr_expired_alert": "QR ini sudah kedaluwarsa.",
+    },
+    "vi": {
+        "stats_sender_title": "Thống kê người gửi của bạn", "stats_receiver_title": "Thống kê người nhận của bạn", "stats_today": "📅 Hôm nay — {date}", "stats_lifetime": "🏁 Toàn thời gian", "stats_total": "Tổng", "stats_pending": "Đang chờ", "stats_done": "Hoàn tất", "stats_failed": "Thất bại",
+        "caption_date": "Ngày", "caption_photo_today": "Ảnh #{daily_no} hôm nay", "caption_id": "ID", "caption_expires": "Hết hạn", "caption_time_left": "Thời gian còn lại", "caption_reserved": "Đã giữ", "caption_status": "Trạng thái", "caption_updated": "Đã cập nhật", "caption_reason": "Lý do", "caption_sender_reserve_released": "Số dư đã giữ của người gửi đã được giải phóng.",
+        "btn_accept_scan": "✅ Nhận lượt quét", "btn_done": "✅ Hoàn tất", "btn_failed": "❌ Thất bại", "btn_notify_receiver": "🔔 Nhắc người nhận", "btn_open_pending_qr": "📥 Mở QR đang chờ", "btn_cancel": "⬅️ Hủy",
+        "offer_new": "📥 Có QR mới để quét", "offer_id": "ID ưu đãi", "offer_tap_to_claim": "Nhấn Nhận lượt quét để nhận. QR chỉ được gửi nếu bạn nhận thành công.",
+        "sender_offer_created": "📡 Đã tạo ưu đãi marketplace.", "sender_offer_sent": "📡 Ưu đãi đã gửi đến người nhận đang online", "sender_offer_accepted": "⏳ Ưu đãi QR của bạn đã được nhận. Đang chờ người nhận cập nhật.", "offer_failed_no_receiver": "❌ Ưu đãi thất bại. Không thể thông báo cho người nhận online nào. Số dư đã giữ đã được giải phóng.",
+        "receiver_qr_timer_hint": "Vui lòng đánh dấu Hoàn tất hoặc Thất bại trước khi QR này hết hạn.", "receiver_expiry_warning": "⚠️ QR này sẽ hết hạn sau khoảng {time_left}. Vui lòng đánh dấu Hoàn tất hoặc Thất bại trước khi hết hạn.", "receiver_time_left_line": "⏳ Thời gian còn lại: {time_left}",
+        "time_expired": "đã hết hạn", "time_seconds": "{seconds} giây", "time_minutes_seconds": "{minutes} phút {seconds} giây", "status_expired_caps": "ĐÃ HẾT HẠN", "status_expired_by_admin_caps": "ADMIN ĐÃ CHO HẾT HẠN",
+        "expired_offer_text": "⏱ Ưu đãi đã hết hạn.\n🆔 ID ưu đãi: {public_id}\nQR này không thể được nhận hoặc hoàn tất nữa.", "expired_caption_status_line": "⏱ Trạng thái: ĐÃ HẾT HẠN",
+        "qr_marked_failed": "❌ QR đã được đánh dấu thất bại", "select_failure_reason": "❌ Chọn lý do thất bại.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Chọn lý do thất bại.", "marked_failed_alert": "Đã đánh dấu thất bại.",
+        "fail_reason_qr_not_working": "❌ QR không hoạt động", "fail_reason_qr_expired": "⏱ QR đã hết hạn", "fail_reason_limit_over": "🚫 Tôi đã hết hạn mức",
+        "only_active_sender_photos": "Chỉ người gửi đã đăng ký và đang hoạt động mới có thể gửi ảnh QR.", "maintenance_paused": "🚧 Chế độ bảo trì đang BẬT. Admin đã tạm dừng gửi QR mới.", "no_receiver_online": "Hiện không có người nhận nào online. Dùng /status để kiểm tra sức chứa trước khi gửi.",
+        "insufficient_wallet": "Số dư ví không đủ. Cần cho mỗi lượt quét: ${required} USDT.\nKhả dụng: ${available} USDT.\n\nDùng /wallet và /loadwallet để nạp thêm.",
+        "photo_rejected_clear_qr": "Ảnh bị từ chối: {error}\n\nGửi ảnh rõ ràng chứa đúng một mã QR có thể đọc được. Chú thích/văn bản sẽ bị bỏ qua.", "photo_rejected_process": "Ảnh bị từ chối: tôi không thể xử lý ảnh QR đó.", "clean_qr_send_failed": "Tôi đã tạo QR sạch nhưng không thể lưu/gửi lại cho bạn. Vui lòng thử lại.", "send_photo_not_document": "Vui lòng gửi QR dưới dạng ảnh Telegram, không phải tài liệu. Ảnh được xử lý nhanh hơn.",
+        "auto_off_limit_zero": "🔴 Hạn mức quét của bạn đã về 0 nên bạn tự động chuyển offline. Dùng /on LIMIT để online lại.", "sender_notify_limit_zero": "🔴 Một người nhận đã hết hạn mức và hiện offline. Dùng /status để xem sức chứa hiện tại.",
+        "sender_reminder": "🔔 Nhắc nhở từ người gửi\n🆔 ID QR: {public_id}\n⏱ Hết hạn: {expires}\n⏳ Thời gian còn lại: {time_left}\n\nVui lòng hoàn tất QR đang chờ này hoặc đánh dấu thất bại.", "receiver_notified": "Đã nhắc người nhận.", "qr_opened_below": "QR đã được mở bên dưới.", "qr_expired_alert": "QR này đã hết hạn.",
+    },
+    "zh": {
+        "stats_sender_title": "您的发送方统计", "stats_receiver_title": "您的接收方统计", "stats_today": "📅 今日 — {date}", "stats_lifetime": "🏁 全部历史", "stats_total": "总计", "stats_pending": "待处理", "stats_done": "完成", "stats_failed": "失败",
+        "caption_date": "日期", "caption_photo_today": "今日照片 #{daily_no}", "caption_id": "ID", "caption_expires": "有效期至", "caption_time_left": "剩余时间", "caption_reserved": "已预留", "caption_status": "状态", "caption_updated": "更新时间", "caption_reason": "原因", "caption_sender_reserve_released": "发送方预留余额已释放。",
+        "btn_accept_scan": "✅ 接受扫描", "btn_done": "✅ 完成", "btn_failed": "❌ 失败", "btn_notify_receiver": "🔔 提醒接收方", "btn_open_pending_qr": "📥 打开待处理 QR", "btn_cancel": "⬅️ 取消",
+        "offer_new": "📥 有新的 QR 扫描任务", "offer_id": "报价 ID", "offer_tap_to_claim": "点击“接受扫描”领取。只有抢单成功后才会发送 QR。",
+        "sender_offer_created": "📡 Marketplace 报价已创建。", "sender_offer_sent": "📡 报价已发送给在线接收方", "sender_offer_accepted": "⏳ 您的 QR 报价已被接受，正在等待接收方更新。", "offer_failed_no_receiver": "❌ 报价失败。无法通知任何在线接收方。预留余额已释放。",
+        "receiver_qr_timer_hint": "请在此 QR 过期前标记完成或失败。", "receiver_expiry_warning": "⚠️ 此 QR 大约将在 {time_left} 后过期。请在过期前标记完成或失败。", "receiver_time_left_line": "⏳ 剩余时间：{time_left}",
+        "time_expired": "已过期", "time_seconds": "{seconds}秒", "time_minutes_seconds": "{minutes}分 {seconds}秒", "status_expired_caps": "已过期", "status_expired_by_admin_caps": "管理员已设为过期",
+        "expired_offer_text": "⏱ 报价已过期。\n🆔 报价 ID：{public_id}\n此 QR 不能再被接受或完成。", "expired_caption_status_line": "⏱ 状态：已过期",
+        "qr_marked_failed": "❌ QR 已标记为失败", "select_failure_reason": "❌ 请选择失败原因。\n🆔 ID：{public_id}", "select_failure_reason_alert": "请选择失败原因。", "marked_failed_alert": "已标记为失败。",
+        "fail_reason_qr_not_working": "❌ QR 无法使用", "fail_reason_qr_expired": "⏱ QR 已过期", "fail_reason_limit_over": "🚫 我的额度已用完",
+        "only_active_sender_photos": "只有已激活的注册发送方可以发送 QR 照片。", "maintenance_paused": "🚧 维护模式已开启。管理员已暂停新的 QR 提交。", "no_receiver_online": "当前没有接收方在线。发送前请使用 /status 查看容量。",
+        "insufficient_wallet": "钱包余额不足。每次扫描需要：${required} USDT。\n可用：${available} USDT。\n\n请使用 /wallet 和 /loadwallet 充值。",
+        "photo_rejected_clear_qr": "照片被拒绝：{error}\n\n请发送一张清晰照片，且只包含一个可读取的 QR 码。说明文字/文本会被忽略。", "photo_rejected_process": "照片被拒绝：我无法处理该 QR 图片。", "clean_qr_send_failed": "我已生成干净的 QR，但无法保存/发送给您。请重试。", "send_photo_not_document": "请将 QR 作为 Telegram 照片发送，不要作为文件发送。照片处理更快。",
+        "auto_off_limit_zero": "🔴 您的扫描额度已归零，因此已自动下线。请使用 /on LIMIT 重新上线。", "sender_notify_limit_zero": "🔴 一位接收方额度已用完并已离线。请使用 /status 查看当前容量。",
+        "sender_reminder": "🔔 发送方提醒\n🆔 QR ID：{public_id}\n⏱ 有效期至：{expires}\n⏳ 剩余时间：{time_left}\n\n请完成此待处理 QR，或将其标记为失败。", "receiver_notified": "已提醒接收方。", "qr_opened_below": "QR 已在下方打开。", "qr_expired_alert": "此 QR 已过期。",
+    },
+    "es": {
+        "stats_sender_title": "Tus estadísticas como remitente", "stats_receiver_title": "Tus estadísticas como receptor", "stats_today": "📅 Hoy — {date}", "stats_lifetime": "🏁 Histórico", "stats_total": "Total", "stats_pending": "Pendiente", "stats_done": "Completado", "stats_failed": "Fallido",
+        "caption_date": "Fecha", "caption_photo_today": "Foto #{daily_no} de hoy", "caption_id": "ID", "caption_expires": "Vence", "caption_time_left": "Tiempo restante", "caption_reserved": "Reservado", "caption_status": "Estado", "caption_updated": "Actualizado", "caption_reason": "Motivo", "caption_sender_reserve_released": "La reserva del remitente se ha liberado.",
+        "btn_accept_scan": "✅ Aceptar escaneo", "btn_done": "✅ Completado", "btn_failed": "❌ Fallido", "btn_notify_receiver": "🔔 Notificar receptor", "btn_open_pending_qr": "📥 Abrir QR pendiente", "btn_cancel": "⬅️ Cancelar",
+        "offer_new": "📥 Nuevo QR disponible para escanear", "offer_id": "ID de oferta", "offer_tap_to_claim": "Toca Aceptar escaneo para reclamarlo. El QR se enviará solo si ganas la asignación.",
+        "sender_offer_created": "📡 Oferta creada en el marketplace.", "sender_offer_sent": "📡 Oferta enviada a receptores en línea", "sender_offer_accepted": "⏳ Tu oferta QR fue aceptada. Esperando actualización del receptor.", "offer_failed_no_receiver": "❌ La oferta falló. No se pudo notificar a ningún receptor en línea. El saldo reservado se liberó.",
+        "receiver_qr_timer_hint": "Marca Completado o Fallido antes de que venza este QR.", "receiver_expiry_warning": "⚠️ Este QR vencerá en aproximadamente {time_left}. Marca Completado o Fallido antes del vencimiento.", "receiver_time_left_line": "⏳ Tiempo restante: {time_left}",
+        "time_expired": "vencido", "time_seconds": "{seconds} s", "time_minutes_seconds": "{minutes} min {seconds} s", "status_expired_caps": "VENCIDO", "status_expired_by_admin_caps": "VENCIDO POR ADMIN",
+        "expired_offer_text": "⏱ Oferta vencida.\n🆔 ID de oferta: {public_id}\nEste QR ya no se puede aceptar ni completar.", "expired_caption_status_line": "⏱ Estado: VENCIDO",
+        "qr_marked_failed": "❌ QR marcado como fallido", "select_failure_reason": "❌ Selecciona el motivo del fallo.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Selecciona el motivo del fallo.", "marked_failed_alert": "Marcado como fallido.",
+        "fail_reason_qr_not_working": "❌ El QR no funciona", "fail_reason_qr_expired": "⏱ El QR venció", "fail_reason_limit_over": "🚫 Mi límite se agotó",
+        "only_active_sender_photos": "Solo un remitente registrado y activo puede enviar fotos QR.", "maintenance_paused": "🚧 El modo de mantenimiento está ACTIVADO. El admin pausó los nuevos envíos de QR.", "no_receiver_online": "No hay ningún receptor en línea ahora. Usa /status para revisar la capacidad antes de enviar.",
+        "insufficient_wallet": "Saldo insuficiente en la billetera. Requerido por escaneo: ${required} USDT.\nDisponible: ${available} USDT.\n\nUsa /wallet y /loadwallet para añadir saldo.",
+        "photo_rejected_clear_qr": "Foto rechazada: {error}\n\nEnvía una foto clara que contenga exactamente un código QR legible. Los textos/captions se ignoran.", "photo_rejected_process": "Foto rechazada: no pude procesar esa imagen QR.", "clean_qr_send_failed": "Generé el QR limpio, pero no pude guardarlo/enviártelo. Inténtalo de nuevo.", "send_photo_not_document": "Envía el QR como foto de Telegram, no como documento. Las fotos se procesan más rápido.",
+        "auto_off_limit_zero": "🔴 Tu límite de escaneos llegó a cero, así que fuiste puesto fuera de línea automáticamente. Usa /on LIMIT para volver a estar en línea.", "sender_notify_limit_zero": "🔴 Un receptor alcanzó su límite y ahora está fuera de línea. Usa /status para ver la capacidad actual.",
+        "sender_reminder": "🔔 Recordatorio del remitente\n🆔 ID QR: {public_id}\n⏱ Vence: {expires}\n⏳ Tiempo restante: {time_left}\n\nCompleta este QR pendiente o márcalo como fallido.", "receiver_notified": "Receptor notificado.", "qr_opened_below": "QR abierto abajo.", "qr_expired_alert": "Este QR ya venció.",
+    },
+}
+for _code, _items in _ADDITIONAL_USER_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _ADDITIONAL_USER_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
+_LIMIT_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "cmd_limit": "• /limit +5 or /limit -5 — add or reduce your current receiver scan limit",
+        "limit_usage": "Usage: /limit +5 or /limit -5\nUse this to add or reduce your current receiver scan limit.",
+        "only_active_receivers_limit": "Only active receivers can use /limit.",
+        "limit_no_current": "You do not have an active receiver limit yet. Use /on LIMIT first, for example /on 25.",
+        "limit_adjusted": "✅ Receiver limit updated.\nChange: {delta} scans\nCurrent remaining limit: {remaining} / {total} scans.",
+        "limit_adjusted_offline": "✅ Receiver limit updated.\nChange: {delta} scans\nCurrent remaining limit is 0, so you are now offline. Use /on LIMIT to go online again.",
+        "limit_delta_zero": "Limit change cannot be 0. Use /limit +5 or /limit -5.",
+    },
+    "id": {
+        "cmd_limit": "• /limit +5 atau /limit -5 — tambah atau kurangi limit scan penerima saat ini",
+        "limit_usage": "Penggunaan: /limit +5 atau /limit -5\nGunakan ini untuk menambah atau mengurangi limit scan penerima saat ini.",
+        "only_active_receivers_limit": "Hanya penerima aktif yang dapat menggunakan /limit.",
+        "limit_no_current": "Anda belum memiliki limit penerima yang aktif. Gunakan /on LIMIT terlebih dahulu, contoh /on 25.",
+        "limit_adjusted": "✅ Limit penerima diperbarui.\nPerubahan: {delta} scan\nSisa limit saat ini: {remaining} / {total} scan.",
+        "limit_adjusted_offline": "✅ Limit penerima diperbarui.\nPerubahan: {delta} scan\nSisa limit saat ini 0, jadi Anda sekarang offline. Gunakan /on LIMIT untuk online lagi.",
+        "limit_delta_zero": "Perubahan limit tidak boleh 0. Gunakan /limit +5 atau /limit -5.",
+    },
+    "vi": {
+        "cmd_limit": "• /limit +5 hoặc /limit -5 — tăng hoặc giảm hạn mức quét hiện tại của người nhận",
+        "limit_usage": "Cách dùng: /limit +5 hoặc /limit -5\nDùng lệnh này để tăng hoặc giảm hạn mức quét hiện tại của người nhận.",
+        "only_active_receivers_limit": "Chỉ người nhận đang hoạt động mới có thể dùng /limit.",
+        "limit_no_current": "Bạn chưa có hạn mức người nhận đang hoạt động. Hãy dùng /on LIMIT trước, ví dụ /on 25.",
+        "limit_adjusted": "✅ Hạn mức người nhận đã được cập nhật.\nThay đổi: {delta} lượt quét\nHạn mức còn lại hiện tại: {remaining} / {total} lượt quét.",
+        "limit_adjusted_offline": "✅ Hạn mức người nhận đã được cập nhật.\nThay đổi: {delta} lượt quét\nHạn mức còn lại hiện tại là 0, nên bạn hiện đang offline. Dùng /on LIMIT để online lại.",
+        "limit_delta_zero": "Mức thay đổi không được là 0. Dùng /limit +5 hoặc /limit -5.",
+    },
+    "zh": {
+        "cmd_limit": "• /limit +5 或 /limit -5 — 增加或减少当前接收方扫描额度",
+        "limit_usage": "用法：/limit +5 或 /limit -5\n使用此命令增加或减少您当前的接收方扫描额度。",
+        "only_active_receivers_limit": "只有活跃接收方可以使用 /limit。",
+        "limit_no_current": "您还没有有效的接收方额度。请先使用 /on LIMIT，例如 /on 25。",
+        "limit_adjusted": "✅ 接收方额度已更新。\n变化：{delta} 次扫描\n当前剩余额度：{remaining} / {total} 次扫描。",
+        "limit_adjusted_offline": "✅ 接收方额度已更新。\n变化：{delta} 次扫描\n当前剩余额度为 0，因此您现在已下线。请使用 /on LIMIT 重新上线。",
+        "limit_delta_zero": "额度变化不能为 0。请使用 /limit +5 或 /limit -5。",
+    },
+    "es": {
+        "cmd_limit": "• /limit +5 o /limit -5 — añadir o reducir tu límite actual de escaneos como receptor",
+        "limit_usage": "Uso: /limit +5 o /limit -5\nUsa esto para añadir o reducir tu límite actual de escaneos como receptor.",
+        "only_active_receivers_limit": "Solo los receptores activos pueden usar /limit.",
+        "limit_no_current": "Aún no tienes un límite de receptor activo. Usa /on LIMIT primero, por ejemplo /on 25.",
+        "limit_adjusted": "✅ Límite de receptor actualizado.\nCambio: {delta} escaneos\nLímite restante actual: {remaining} / {total} escaneos.",
+        "limit_adjusted_offline": "✅ Límite de receptor actualizado.\nCambio: {delta} escaneos\nEl límite restante actual es 0, así que ahora estás fuera de línea. Usa /on LIMIT para volver a estar en línea.",
+        "limit_delta_zero": "El cambio de límite no puede ser 0. Usa /limit +5 o /limit -5.",
+    },
+}
+for _code, _items in _LIMIT_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _LIMIT_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
 def normalize_language_code(value: str | None) -> str:
     code = str(value or "").strip().lower()
     if code in {"english", "eng"}:
@@ -963,6 +1158,7 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         "reserved_usdt": "REAL NOT NULL DEFAULT 0",
         "settled_at": "TEXT",
         "failure_reason": "TEXT",
+        "receiver_warning_sent_at": "TEXT",
     }.items():
         _add_column_if_missing(conn, "photos", column, definition)
 
@@ -1230,6 +1426,7 @@ def init_db() -> None:
                 earned_usdt REAL NOT NULL DEFAULT 0,
                 reserved_usdt REAL NOT NULL DEFAULT 0,
                 settled_at TEXT,
+                receiver_warning_sent_at TEXT,
                 FOREIGN KEY(sender_chat_id) REFERENCES users(chat_id),
                 FOREIGN KEY(receiver_chat_id) REFERENCES users(chat_id)
             );
@@ -1492,6 +1689,25 @@ def seconds_since_iso(value: str | datetime | None) -> int:
     if dt is None:
         return 0
     return max(0, int(now_dt().timestamp() - dt.timestamp()))
+
+def format_time_left_for_chat(chat_id: int | None, expires_at: str | datetime | None) -> str:
+    seconds = seconds_until_iso(expires_at)
+    if seconds <= 0:
+        return tr_chat(chat_id, "time_expired")
+    minutes, secs = divmod(seconds, 60)
+    if minutes <= 0:
+        return tr_chat(chat_id, "time_seconds", seconds=secs)
+    return tr_chat(chat_id, "time_minutes_seconds", minutes=minutes, seconds=secs)
+
+
+def format_time_left_for_lang(lang: str | None, expires_at: str | datetime | None) -> str:
+    seconds = seconds_until_iso(expires_at)
+    if seconds <= 0:
+        return tr_lang(lang, "time_expired")
+    minutes, secs = divmod(seconds, 60)
+    if minutes <= 0:
+        return tr_lang(lang, "time_seconds", seconds=secs)
+    return tr_lang(lang, "time_minutes_seconds", minutes=minutes, seconds=secs)
 
 
 def qr_expiry_status_at(row: sqlite3.Row | None) -> str:
@@ -2103,14 +2319,24 @@ def stats_for_filters(
     return counts
 
 
-def _stats_block(label: str, counts: dict[str, int | str]) -> str:
+def _stats_block(label: str, counts: dict[str, int | str], chat_id: int | None = None) -> str:
     return (
         f"{label}\n"
-        f"📦 Total: {counts['total']}\n"
-        f"⏳ Pending: {counts['pending']}\n"
-        f"✅ Done: {counts['done']}\n"
-        f"❌ Failed: {counts['failed']}"
+        f"📦 {tr_chat(chat_id, 'stats_total')}: {counts['total']}\n"
+        f"⏳ {tr_chat(chat_id, 'stats_pending')}: {counts['pending']}\n"
+        f"✅ {tr_chat(chat_id, 'stats_done')}: {counts['done']}\n"
+        f"❌ {tr_chat(chat_id, 'stats_failed')}: {counts['failed']}"
     )
+
+
+def _localized_stats_title(title: str, chat_id: int | None = None) -> str:
+    clean_title = str(title or "").strip().rstrip(":")
+    low = clean_title.lower()
+    if low == "your sender stats":
+        return tr_chat(chat_id, "stats_sender_title")
+    if low == "your receiver stats":
+        return tr_chat(chat_id, "stats_receiver_title")
+    return clean_title
 
 
 def stats_summary_text(
@@ -2118,16 +2344,18 @@ def stats_summary_text(
     *,
     sender_chat_id: int | None = None,
     receiver_chat_id: int | None = None,
+    chat_id: int | None = None,
 ) -> str:
     today = stats_for_filters(scope="today", sender_chat_id=sender_chat_id, receiver_chat_id=receiver_chat_id)
     lifetime = stats_for_filters(scope="lifetime", sender_chat_id=sender_chat_id, receiver_chat_id=receiver_chat_id)
 
-    clean_title = title.strip().rstrip(":")
-    today_label = f"📅 Today — {display_date(str(today['scope']))}"
+    clean_title = _localized_stats_title(title, chat_id)
+    today_label = tr_chat(chat_id, "stats_today", date=display_date(str(today['scope'])))
+    lifetime_label = tr_chat(chat_id, "stats_lifetime")
     return (
         f"📊 {clean_title}\n\n"
-        f"{_stats_block(today_label, today)}\n\n"
-        f"{_stats_block('🏁 Lifetime', lifetime)}"
+        f"{_stats_block(today_label, today, chat_id)}\n\n"
+        f"{_stats_block(lifetime_label, lifetime, chat_id)}"
     )
 
 
@@ -2901,6 +3129,42 @@ def receiver_presence_row(chat_id: int) -> sqlite3.Row | None:
         return conn.execute("SELECT * FROM receiver_presence WHERE chat_id = ?", (chat_id,)).fetchone()
 
 
+def adjust_receiver_limit(chat_id: int, delta: int) -> tuple[int, int, bool]:
+    """Adjust a receiver's current scan limit.
+
+    Returns (limit_remaining, limit_total, online). The same delta is applied to
+    both the session total and remaining count so /limit +5 adds five more
+    possible scans and /limit -5 removes five from the current capacity.
+    """
+    delta = int(delta)
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM receiver_presence WHERE chat_id = ?", (int(chat_id),)).fetchone()
+        if not row:
+            if delta <= 0:
+                return 0, 0, False
+            total = delta
+            remaining = delta
+            online = True
+            conn.execute(
+                """
+                INSERT INTO receiver_presence(chat_id, online, limit_total, limit_remaining, updated_at)
+                VALUES (?, 1, ?, ?, ?)
+                """,
+                (int(chat_id), total, remaining, now_iso()),
+            )
+            return remaining, total, online
+        total = max(0, int(row["limit_total"] or 0) + delta)
+        remaining = max(0, int(row["limit_remaining"] or 0) + delta)
+        if remaining > total:
+            total = remaining
+        online = remaining > 0
+        conn.execute(
+            "UPDATE receiver_presence SET limit_total = ?, limit_remaining = ?, online = ?, updated_at = ? WHERE chat_id = ?",
+            (total, remaining, 1 if online else 0, now_iso(), int(chat_id)),
+        )
+        return remaining, total, online
+
+
 def marketplace_status_text(for_chat_id: int | None = None) -> str:
     receivers = online_receivers()
     capacity = sum(int(r["limit_remaining"] or 0) for r in receivers)
@@ -2932,17 +3196,18 @@ def marketplace_status_text(for_chat_id: int | None = None) -> str:
     return text
 
 
-def build_offer_keyboard(public_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Accept Scan", callback_data=f"claim:{public_id}")]])
+def build_offer_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_accept_scan"), callback_data=f"claim:{public_id}")]])
 
 
-def build_offer_text(public_id: str, daily_no: int, sender_rate: Decimal, receiver_rate: Decimal, expires_at: str) -> str:
+def build_offer_text(public_id: str, daily_no: int, sender_rate: Decimal, receiver_rate: Decimal, expires_at: str, chat_id: int | None = None) -> str:
     return (
-        "📥 New QR scan available\n"
-        f"🆔 Offer ID: {public_id}\n"
-        f"📷 Photo #{daily_no} today\n"
-        f"⏱ Expires: {display_datetime(expires_at)}\n\n"
-        "Tap Accept Scan to claim it. The QR will be sent only if you win the claim."
+        f"{tr_chat(chat_id, 'offer_new')}\n"
+        f"🆔 {tr_chat(chat_id, 'offer_id')}: {public_id}\n"
+        f"📷 {tr_chat(chat_id, 'caption_photo_today', daily_no=daily_no)}\n"
+        f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}\n"
+        f"{tr_chat(chat_id, 'receiver_time_left_line', time_left=format_time_left_for_chat(chat_id, expires_at))}\n\n"
+        f"{tr_chat(chat_id, 'offer_tap_to_claim')}"
     )
 
 
@@ -3020,6 +3285,52 @@ def list_pending_qrs_to_expire(now_value: str | datetime | None = None, limit: i
             (fetch_limit,),
         ).fetchall()
     return [row for row in rows if iso_is_due(row["offer_expires_at"], due_now)][: max(1, int(limit or 100))]
+
+
+def list_claimed_qrs_needing_expiry_warning(now_value: str | datetime | None = None, limit: int = 100) -> list[sqlite3.Row]:
+    due_now = parse_bot_datetime(now_value) if now_value is not None else now_dt()
+    if due_now is None:
+        due_now = now_dt()
+    fetch_limit = max(int(limit or 100) * 5, int(limit or 100), 100)
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM photos
+            WHERE status = 'pending'
+              AND offer_state = 'claimed'
+              AND receiver_chat_id IS NOT NULL
+              AND receiver_chat_id != 0
+              AND offer_expires_at IS NOT NULL
+              AND receiver_warning_sent_at IS NULL
+            ORDER BY offer_expires_at ASC LIMIT ?
+            """,
+            (fetch_limit,),
+        ).fetchall()
+    due_rows: list[sqlite3.Row] = []
+    for row in rows:
+        expires_dt = parse_bot_datetime(row["offer_expires_at"])
+        if expires_dt is None:
+            continue
+        seconds_left = int(expires_dt.timestamp() - due_now.timestamp())
+        if 0 < seconds_left <= 60:
+            due_rows.append(row)
+    return due_rows[: max(1, int(limit or 100))]
+
+
+def mark_receiver_expiry_warning_sent(public_id: str) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE photos
+            SET receiver_warning_sent_at = ?
+            WHERE public_id = ?
+              AND receiver_warning_sent_at IS NULL
+              AND status = 'pending'
+              AND offer_state = 'claimed'
+            """,
+            (now_iso(), public_id),
+        )
+        return cur.rowcount > 0
 
 
 def expire_offer_in_db(public_id: str, reason: str = "expired") -> sqlite3.Row | None:
@@ -6406,34 +6717,39 @@ async def delete_original_sender_message_safely(
 # -----------------------------
 
 
-def build_caption(date_str: str, daily_no: int, public_id: str) -> str:
+def build_caption(date_str: str, daily_no: int, public_id: str, chat_id: int | None = None) -> str:
     return (
-        f"📅 Date: {display_date(date_str)}\n"
-        f"📷 Photo #{daily_no} today\n"
-        f"🆔 ID: {public_id}"
+        f"📅 {tr_chat(chat_id, 'caption_date')}: {display_date(date_str)}\n"
+        f"📷 {tr_chat(chat_id, 'caption_photo_today', daily_no=daily_no)}\n"
+        f"🆔 {tr_chat(chat_id, 'caption_id')}: {public_id}"
     )
 
 
-def build_receiver_qr_caption(date_str: str, daily_no: int, public_id: str, expires_at: str | None = None) -> str:
-    lines = [build_caption(date_str, daily_no, public_id)]
+def build_receiver_qr_caption(date_str: str, daily_no: int, public_id: str, expires_at: str | None = None, chat_id: int | None = None) -> str:
+    lines = [build_caption(date_str, daily_no, public_id, chat_id)]
     if expires_at:
-        lines.extend(["", f"⏱ Expires: {display_datetime(expires_at)}"])
+        lines.extend([
+            "",
+            f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}",
+            tr_chat(chat_id, "receiver_time_left_line", time_left=format_time_left_for_chat(chat_id, expires_at)),
+            tr_chat(chat_id, "receiver_qr_timer_hint"),
+        ])
     return "\n".join(lines)
 
 
-def build_status_caption(photo: PhotoRow, status: str, failure_reason: str | None = None) -> str:
+def build_status_caption(photo: PhotoRow, status: str, failure_reason: str | None = None, chat_id: int | None = None) -> str:
     emoji = "✅" if status == "done" else "❌"
-    status_text = status.upper()
+    status_text = tr_chat(chat_id, "stats_done") if status == "done" else tr_chat(chat_id, "stats_failed")
     lines = [
-        build_caption(photo.date, photo.daily_no, photo.public_id),
+        build_caption(photo.date, photo.daily_no, photo.public_id, chat_id),
         "",
-        f"{emoji} Status: {status_text}",
-        f"🕒 Updated: {display_datetime()}",
+        f"{emoji} {tr_chat(chat_id, 'caption_status')}: {status_text}",
+        f"🕒 {tr_chat(chat_id, 'caption_updated')}: {display_datetime()}",
     ]
     if status == "failed":
         reason = clean_failure_reason_text(failure_reason)
         if reason:
-            lines.append(f"📝 Reason: {reason}")
+            lines.append(f"📝 {tr_chat(chat_id, 'caption_reason')}: {reason}")
     return "\n".join(lines)
 
 
@@ -6445,12 +6761,14 @@ def build_sender_offer_caption(
     *,
     expires_at: str | None = None,
     sender_rate: Decimal | str | float | int | None = None,
+    chat_id: int | None = None,
 ) -> str:
-    lines = [build_caption(date_str, daily_no, public_id), "", status_line]
+    lines = [build_caption(date_str, daily_no, public_id, chat_id), "", status_line]
     if expires_at:
-        lines.append(f"⏱ Expires: {display_datetime(expires_at)}")
+        lines.append(f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}")
+        lines.append(tr_chat(chat_id, "receiver_time_left_line", time_left=format_time_left_for_chat(chat_id, expires_at)))
     if sender_rate is not None:
-        lines.append(f"💳 Reserved: ${_money(sender_rate)} USDT")
+        lines.append(f"💳 {tr_chat(chat_id, 'caption_reserved')}: ${_money(sender_rate)} USDT")
     return "\n".join(lines)
 
 
@@ -6476,21 +6794,26 @@ async def edit_sender_offer_caption(
         return False
 
 
-def receiver_status_keyboard(public_id: str) -> InlineKeyboardMarkup:
+def receiver_status_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("✅ Done", callback_data=f"done:{public_id}"),
-                InlineKeyboardButton("❌ Failed", callback_data=f"failed:{public_id}"),
+                InlineKeyboardButton(tr_chat(chat_id, "btn_done"), callback_data=f"done:{public_id}"),
+                InlineKeyboardButton(tr_chat(chat_id, "btn_failed"), callback_data=f"failed:{public_id}"),
             ],
-            [InlineKeyboardButton("⚠️ Dispute", callback_data=f"disputeqr:{public_id}")],
+            [InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data=f"disputeqr:{public_id}")],
         ]
     )
 
 
-def failure_reason_keyboard(public_id: str) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(label, callback_data=f"failreason:{public_id}:{key}")] for key, label in FAIL_REASON_BUTTONS]
-    rows.append([InlineKeyboardButton("⬅️ Cancel", callback_data="nav:home")])
+def failure_reason_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    label_keys = {
+        "qr_not_working": "fail_reason_qr_not_working",
+        "qr_expired": "fail_reason_qr_expired",
+        "limit_over": "fail_reason_limit_over",
+    }
+    rows = [[InlineKeyboardButton(tr_chat(chat_id, label_keys.get(key, key)), callback_data=f"failreason:{public_id}:{key}")] for key, _label in FAIL_REASON_BUTTONS]
+    rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:home")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -6502,11 +6825,11 @@ def sender_open_offer_keyboard(public_id: str, chat_id: int | None = None) -> In
     )
 
 
-def sender_notify_keyboard(public_id: str) -> InlineKeyboardMarkup:
+def sender_notify_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🔔 Notify Receiver", callback_data=f"notify:{public_id}")],
-            [InlineKeyboardButton("⚠️ Dispute", callback_data=f"disputeqr:{public_id}")],
+            [InlineKeyboardButton(tr_chat(chat_id, "btn_notify_receiver"), callback_data=f"notify:{public_id}")],
+            [InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data=f"disputeqr:{public_id}")],
         ]
     )
 
@@ -6656,6 +6979,7 @@ def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) 
             "",
             tr_chat(chat_id, "commands_receiver"),
             tr_chat(chat_id, "cmd_on"),
+            tr_chat(chat_id, "cmd_limit"),
             tr_chat(chat_id, "cmd_off"),
             tr_chat(chat_id, "cmd_pending"),
             tr_chat(chat_id, "cmd_done"),
@@ -6769,15 +7093,15 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if is_admin(chat_id):
         text = (
-            stats_summary_text("Your sender stats", sender_chat_id=chat_id)
+            stats_summary_text("Your sender stats", sender_chat_id=chat_id, chat_id=chat_id)
             + "\n\n"
-            + stats_summary_text("Your receiver stats", receiver_chat_id=chat_id)
+            + stats_summary_text("Your receiver stats", receiver_chat_id=chat_id, chat_id=chat_id)
         )
         await update.message.reply_text(text)
     elif user and user.role == "sender":
-        await update.message.reply_text(stats_summary_text("Your sender stats", sender_chat_id=chat_id))
+        await update.message.reply_text(stats_summary_text("Your sender stats", sender_chat_id=chat_id, chat_id=chat_id))
     else:
-        await update.message.reply_text(stats_summary_text("Your receiver stats", receiver_chat_id=chat_id))
+        await update.message.reply_text(stats_summary_text("Your receiver stats", receiver_chat_id=chat_id, chat_id=chat_id))
 
 
 
@@ -6793,7 +7117,7 @@ def _receiver_pending_text_keyboard(chat_id: int) -> tuple[str, InlineKeyboardMa
     keyboard: list[list[InlineKeyboardButton]] = []
     for row in rows:
         public_id = str(row["public_id"])
-        lines.append(f"{public_id} | 📷 Photo #{row['daily_no']} | 📅 {display_date(row['date'])}")
+        lines.append(f"{public_id} | 📷 {tr_chat(chat_id, 'caption_photo_today', daily_no=row['daily_no'])} | 📅 {display_date(row['date'])}")
         keyboard.append([InlineKeyboardButton(public_id, callback_data=f"pendingqr:{public_id}")])
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
 
@@ -7265,6 +7589,39 @@ async def off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("Receiver %s offline; notified senders sent=%s failed=%s", chat_id, sent, failed)
 
 
+async def limit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    observe_telegram_profile(update.effective_user)
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    user = get_user_for_chat(chat_id)
+    if not can_use_receiver_features(chat_id, user):
+        await update.message.reply_text(tr_chat(chat_id, "only_active_receivers_limit"))
+        return
+    raw = str(context.args[0]).strip() if context.args else ""
+    if not raw or raw[0] not in "+-":
+        await update.message.reply_text(tr_chat(chat_id, "limit_usage"))
+        return
+    try:
+        delta = int(raw)
+    except ValueError:
+        await update.message.reply_text(tr_chat(chat_id, "limit_usage"))
+        return
+    if delta == 0:
+        await update.message.reply_text(tr_chat(chat_id, "limit_delta_zero"))
+        return
+    existing = receiver_presence_row(chat_id)
+    if not existing and delta < 0:
+        await update.message.reply_text(tr_chat(chat_id, "limit_no_current"))
+        return
+    remaining, total, online = adjust_receiver_limit(chat_id, delta)
+    delta_text = f"{delta:+d}"
+    if online:
+        await update.message.reply_text(tr_chat(chat_id, "limit_adjusted", delta=delta_text, remaining=remaining, total=total))
+    else:
+        await update.message.reply_text(tr_chat(chat_id, "limit_adjusted_offline", delta=delta_text, remaining=remaining, total=total))
+
+
 async def marketplace_status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     observe_telegram_profile(update.effective_user)
     if not update.message or not update.effective_chat:
@@ -7332,7 +7689,7 @@ def _sender_wallet_text(chat_id: int) -> str:
     )
 
 
-def _topup_methods_keyboard(settings: dict | None = None) -> InlineKeyboardMarkup:
+def _topup_methods_keyboard(settings: dict | None = None, chat_id: int | None = None) -> InlineKeyboardMarkup:
     settings = settings or get_marketplace_settings()
     rows: list[list[InlineKeyboardButton]] = []
     if payment_method_enabled("bep20", settings):
@@ -7790,7 +8147,7 @@ async def _send_load_wallet_options(message, chat_id: int) -> None:
     await message.reply_text(
         tr_chat(chat_id, "topup_choose"),
         parse_mode="Markdown",
-        reply_markup=_topup_methods_keyboard(settings),
+        reply_markup=_topup_methods_keyboard(settings, chat_id),
     )
 
 
@@ -8065,7 +8422,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(
             tr_chat(chat_id, "topup_choose"),
             parse_mode="Markdown",
-            reply_markup=_topup_methods_keyboard(settings),
+            reply_markup=_topup_methods_keyboard(settings, chat_id),
         )
         return
     if data == "nav:status":
@@ -8107,11 +8464,11 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if data == "nav:stats":
         if is_admin(chat_id):
-            text = stats_summary_text("Your sender stats", sender_chat_id=chat_id) + "\n\n" + stats_summary_text("Your receiver stats", receiver_chat_id=chat_id)
+            text = stats_summary_text("Your sender stats", sender_chat_id=chat_id, chat_id=chat_id) + "\n\n" + stats_summary_text("Your receiver stats", receiver_chat_id=chat_id, chat_id=chat_id)
         elif user and user.role == "sender":
-            text = stats_summary_text("Your sender stats", sender_chat_id=chat_id)
+            text = stats_summary_text("Your sender stats", sender_chat_id=chat_id, chat_id=chat_id)
         else:
-            text = stats_summary_text("Your receiver stats", receiver_chat_id=chat_id)
+            text = stats_summary_text("Your receiver stats", receiver_chat_id=chat_id, chat_id=chat_id)
         await query.edit_message_text(
             text,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:home")]]),
@@ -8952,11 +9309,71 @@ def schedule_qr_expiry_task(application: Application | None, public_id: str, exp
         logger.exception("Could not schedule QR expiry task for %s", public_id)
 
 
-async def send_offer_to_receivers(context: ContextTypes.DEFAULT_TYPE, public_id: str) -> tuple[int, int]:
+async def send_receiver_expiry_warning(bot, row: sqlite3.Row) -> bool:
+    public_id = str(row["public_id"])
+    receiver_chat_id = int(row["receiver_chat_id"] or 0)
+    if receiver_chat_id <= 0:
+        return False
+    current = get_photo_record(public_id)
+    if not current:
+        return False
+    if str(current["status"] or "").lower() != "pending" or str(current["offer_state"] or "").lower() != "claimed":
+        return False
+    if current["receiver_warning_sent_at"]:
+        return False
+    if iso_is_due(current["offer_expires_at"]):
+        return False
+    if not mark_receiver_expiry_warning_sent(public_id):
+        return False
+    try:
+        await bot.send_message(
+            chat_id=receiver_chat_id,
+            text=tr_chat(
+                receiver_chat_id,
+                "receiver_expiry_warning",
+                time_left=format_time_left_for_chat(receiver_chat_id, current["offer_expires_at"]),
+            ),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(receiver_chat_id, "btn_open_pending_qr"), callback_data=f"pendingqr:{public_id}")]]),
+            protect_content=PROTECT_CONTENT,
+        )
+        return True
+    except TelegramError as exc:
+        logger.warning("Could not send expiry warning for QR %s to receiver %s: %s", public_id, receiver_chat_id, exc)
+        return False
+
+
+async def warn_receiver_before_expiry_after_delay(application: Application, public_id: str, expires_at: str | datetime | None) -> None:
+    try:
+        delay = max(0, seconds_until_iso(expires_at) - 60)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        row = get_photo_record(public_id)
+        if row is not None:
+            await send_receiver_expiry_warning(application.bot, row)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("QR expiry warning task failed for %s", public_id)
+
+
+def schedule_qr_expiry_warning_task(application: Application | None, public_id: str, expires_at: str | datetime | None) -> None:
+    if application is None:
+        return
+    try:
+        application.create_task(
+            warn_receiver_before_expiry_after_delay(application, public_id, expires_at),
+            name=f"qr_expiry_warning_{public_id}",
+        )
+    except TypeError:
+        application.create_task(warn_receiver_before_expiry_after_delay(application, public_id, expires_at))
+    except Exception:
+        logger.exception("Could not schedule QR expiry warning task for %s", public_id)
+
+
+async def send_offer_to_receivers_by_bot(bot, public_id: str) -> tuple[int, int]:
     row = get_photo_record(public_id)
     if not row:
         return 0, 0
-    text = build_offer_text(public_id, int(row["daily_no"]), _dec(row["sender_rate_usdt"]), _dec(row["receiver_rate_usdt"]), str(row["offer_expires_at"]))
     receivers = online_receivers()
     if not receivers:
         return 0, 0
@@ -8969,10 +9386,10 @@ async def send_offer_to_receivers(context: ContextTypes.DEFAULT_TYPE, public_id:
         receiver_chat_id = int(receiver["chat_id"])
         async with semaphore:
             try:
-                msg = await context.bot.send_message(
+                msg = await bot.send_message(
                     chat_id=receiver_chat_id,
-                    text=text,
-                    reply_markup=build_offer_keyboard(public_id),
+                    text=build_offer_text(public_id, int(row["daily_no"]), _dec(row["sender_rate_usdt"]), _dec(row["receiver_rate_usdt"]), str(row["offer_expires_at"]), receiver_chat_id),
+                    reply_markup=build_offer_keyboard(public_id, receiver_chat_id),
                     protect_content=PROTECT_CONTENT,
                 )
                 return receiver_chat_id, msg.message_id
@@ -8990,6 +9407,98 @@ async def send_offer_to_receivers(context: ContextTypes.DEFAULT_TYPE, public_id:
         sent += 1
     return sent, failed
 
+
+async def send_offer_to_receivers(context: ContextTypes.DEFAULT_TYPE, public_id: str) -> tuple[int, int]:
+    return await send_offer_to_receivers_by_bot(context.bot, public_id)
+
+def reopen_failed_qr_in_db(public_id: str, expires_at: str) -> tuple[bool, str, sqlite3.Row | None]:
+    row = get_photo_record(public_id)
+    if not row:
+        return False, "QR order not found.", None
+    status = str(row["status"] or "").lower()
+    if status == "pending":
+        return False, "This QR is already pending/open.", row
+    if status == "done":
+        return False, "Done QR orders cannot be retried. Change it to Failed first if you need to reopen it.", row
+    if not row["generated_file_id"]:
+        return False, "This QR has no stored generated image, so it cannot be retried.", row
+    sender_chat_id = int(row["sender_chat_id"])
+    sender_rate = _dec(row["sender_rate_usdt"])
+    if available_sender_balance(sender_chat_id) < sender_rate:
+        return False, f"Sender available balance is too low to retry. Required: ${_money(sender_rate)} USDT.", row
+    ok, reserve_msg = reserve_sender_funds(sender_chat_id, sender_rate, public_id)
+    if not ok:
+        return False, reserve_msg, row
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute("SELECT * FROM photos WHERE public_id = ?", (public_id,)).fetchone()
+        if not current or str(current["status"] or "").lower() != "failed":
+            conn.rollback()
+            release_sender_reserve(sender_chat_id, sender_rate, public_id, "Retry aborted")
+            return False, "QR was changed before retry could start.", current or row
+        conn.execute("DELETE FROM offer_notifications WHERE public_id = ?", (public_id,))
+        conn.execute(
+            """
+            UPDATE photos
+            SET status = 'pending', offer_state = 'open', receiver_chat_id = 0, receiver_message_id = NULL,
+                claimed_at = NULL, status_by = NULL, status_at = NULL, failure_reason = NULL,
+                offer_expires_at = ?, charged_usdt = 0, earned_usdt = 0, reserved_usdt = ?,
+                settled_at = NULL, receiver_warning_sent_at = NULL
+            WHERE public_id = ?
+            """,
+            (expires_at, float(sender_rate), public_id),
+        )
+        new_row = conn.execute("SELECT * FROM photos WHERE public_id = ?", (public_id,)).fetchone()
+        conn.commit()
+    return True, "QR reopened as a new marketplace offer.", new_row
+
+
+async def admin_retry_qr_order(bot, public_id: str) -> tuple[bool, str]:
+    if not online_receivers():
+        return False, "No online receivers right now. Ask a receiver to use /on LIMIT first, then retry."
+    settings = get_marketplace_settings()
+    expires_at = datetime.fromtimestamp(now_dt().timestamp() + max(1, int(settings["qr_expire_minutes"])) * 60, ZoneInfo(BOT_TZ)).isoformat(timespec="seconds")
+    ok, msg, row = reopen_failed_qr_in_db(public_id, expires_at)
+    if not ok or row is None:
+        return False, msg
+    sent, failed = await send_offer_to_receivers_by_bot(bot, public_id)
+    sender_chat_id = int(row["sender_chat_id"])
+    if sent <= 0:
+        expire_offer_in_db(public_id, "expired")
+        release_sender_reserve(sender_chat_id, _dec(row["sender_rate_usdt"]), public_id, "Retry failed: no receiver could be notified")
+        await edit_sender_offer_caption(
+            bot,
+            sender_chat_id,
+            int(row["sender_message_id"] or 0),
+            build_sender_offer_caption(
+                str(row["date"]),
+                int(row["daily_no"]),
+                public_id,
+                tr_chat(sender_chat_id, "offer_failed_no_receiver"),
+                chat_id=sender_chat_id,
+            ),
+            reply_markup=None,
+        )
+        return False, "Retry failed: no receiver could be notified. Sender reserve was released."
+    await edit_sender_offer_caption(
+        bot,
+        sender_chat_id,
+        int(row["sender_message_id"] or 0),
+        build_sender_offer_caption(
+            str(row["date"]),
+            int(row["daily_no"]),
+            public_id,
+            tr_chat(sender_chat_id, "sender_offer_sent"),
+            expires_at=expires_at,
+            sender_rate=_dec(row["sender_rate_usdt"]),
+            chat_id=sender_chat_id,
+        ),
+        reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
+    )
+    if telegram_application is not None:
+        schedule_qr_expiry_task(telegram_application, public_id, expires_at)
+    return True, f"QR retried and sent to {sent} receiver(s). {failed} failed."
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     observe_telegram_profile(update.effective_user)
     if not update.effective_chat or not update.message:
@@ -9003,26 +9512,24 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     user = get_user_for_chat(chat.id)
     if not can_use_sender_features(chat.id, user):
-        await update.message.reply_text("Only an active registered sender can send QR photos.")
+        await update.message.reply_text(tr_chat(chat.id, "only_active_sender_photos"))
         return
 
     settings = get_marketplace_settings()
     if settings["maintenance_mode"]:
-        await update.message.reply_text("🚧 Maintenance mode is ON. New QR submissions are paused by admin.")
+        await update.message.reply_text(tr_chat(chat.id, "maintenance_paused"))
         return
 
     receivers = online_receivers()
     if not receivers:
-        await update.message.reply_text("No receiver is online right now. Use /status to check capacity before sending.")
+        await update.message.reply_text(tr_chat(chat.id, "no_receiver_online"))
         return
 
     sender_rate = _dec(settings["sender_rate_usdt"])
     receiver_rate = _dec(settings["receiver_rate_usdt"])
     if sender_rate > 0 and available_sender_balance(chat.id) < sender_rate:
         await update.message.reply_text(
-            f"Insufficient wallet balance. Required per scan: ${_money(sender_rate)} USDT.\n"
-            f"Available: ${_money(available_sender_balance(chat.id))} USDT.\n\n"
-            "Use /wallet and /loadwallet to add balance."
+            tr_chat(chat.id, "insufficient_wallet", required=_money(sender_rate), available=_money(available_sender_balance(chat.id)))
         )
         return
 
@@ -9031,14 +9538,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         clean_qr_file, qr_data, qr_hash = await extract_and_rebuild_clean_qr(update.message)
     except ValueError as exc:
         await update.message.reply_text(
-            f"Photo rejected: {exc}\n\n"
-            "Send a clear photo containing exactly one readable QR code. Captions/text are ignored."
+            tr_chat(chat.id, "photo_rejected_clear_qr", error=str(exc))
         )
         await delete_original_sender_message_safely(context, chat.id, update.message.message_id, rejected=True)
         return
     except Exception:
         logger.exception("Unexpected QR processing error")
-        await update.message.reply_text("Photo rejected: I could not process that QR image.")
+        await update.message.reply_text(tr_chat(chat.id, "photo_rejected_process"))
         await delete_original_sender_message_safely(context, chat.id, update.message.message_id, rejected=True)
         return
 
@@ -9058,9 +9564,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         date_str,
         daily_no,
         public_id,
-        "📡 Marketplace offer created.",
+        tr_chat(chat.id, "sender_offer_created"),
         expires_at=expires_at,
         sender_rate=sender_rate,
+        chat_id=chat.id,
     )
 
     try:
@@ -9074,7 +9581,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except TelegramError as exc:
         release_sender_reserve(chat.id, sender_rate, public_id, "Sender delivery failed")
         logger.warning("Telegram send failed: %s", exc)
-        await update.message.reply_text("I generated the clean QR, but could not save/send it back to you. Please try again.")
+        await update.message.reply_text(tr_chat(chat.id, "clean_qr_send_failed"))
         return
 
     save_open_offer(
@@ -9105,7 +9612,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 date_str,
                 daily_no,
                 public_id,
-                "❌ Offer failed. No online receiver could be notified. Reserved balance was released.",
+                tr_chat(chat.id, "offer_failed_no_receiver"),
+                chat_id=chat.id,
             ),
         )
     else:
@@ -9117,9 +9625,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 date_str,
                 daily_no,
                 public_id,
-                "📡 Offer sent to online receiver(s)",
+                tr_chat(chat.id, "sender_offer_sent"),
                 expires_at=expires_at,
                 sender_rate=sender_rate,
+                chat_id=chat.id,
             ),
             reply_markup=sender_open_offer_keyboard(public_id, chat.id),
         )
@@ -9130,7 +9639,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def reject_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
         await update.message.reply_text(
-            "Please send the QR as a Telegram photo, not as a document. Photos are faster to process."
+            tr_chat(update.effective_chat.id if update.effective_chat else None, "send_photo_not_document")
         )
 
 
@@ -9232,7 +9741,7 @@ async def complete_photo(
             await bot.edit_message_caption(
                 chat_id=photo.sender_chat_id,
                 message_id=photo.sender_message_id,
-                caption=new_caption,
+                caption=sender_caption,
                 reply_markup=None,
             )
         except TelegramError as exc:
@@ -9315,15 +9824,15 @@ async def start_failure_reason_flow(
         return
     FAIL_REASON_FLOW.pop(chat_id, None)
     await message.reply_text(
-        f"❌ Select failure reason.\n🆔 ID: {photo.public_id}",
-        reply_markup=failure_reason_keyboard(photo.public_id),
+        tr_chat(chat_id, "select_failure_reason", public_id=photo.public_id),
+        reply_markup=failure_reason_keyboard(photo.public_id, chat_id),
     )
 
 
 async def submit_failure_reason(message, context: ContextTypes.DEFAULT_TYPE, chat_id: int, reason: str) -> None:
     # Custom typed failure reasons are intentionally not accepted.
     # Receivers must use the fixed failure reason buttons so sender/admin messages stay clean and predictable.
-    await message.reply_text("Please select one of the failure reason buttons.")
+    await message.reply_text(tr_chat(chat_id, "select_failure_reason_alert"))
 
 
 async def failed_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9372,9 +9881,13 @@ async def fail_reason_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     if ok:
         FAIL_REASON_FLOW.pop(chat_id, None)
-        await query.answer("Marked failed.", show_alert=False)
+        await query.answer(tr_chat(chat_id, "marked_failed_alert"), show_alert=False)
         try:
-            await query.edit_message_text(f"❌ QR marked failed\n🆔 ID: {public_id}\n📝 Reason: {reason}")
+            await query.edit_message_text(
+                f"{tr_chat(chat_id, 'qr_marked_failed')}\n"
+                f"🆔 {tr_chat(chat_id, 'caption_id')}: {public_id}\n"
+                f"📝 {tr_chat(chat_id, 'caption_reason')}: {reason}"
+            )
         except TelegramError:
             pass
         return
@@ -9414,6 +9927,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         int(row["daily_no"]),
         public_id,
         str(row["offer_expires_at"] or ""),
+        receiver_chat_id,
     )
 
     await query.answer("✅ You got this QR", show_alert=False)
@@ -9427,7 +9941,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     chat_id=note_chat_id,
                     message_id=note_message_id,
                     media=InputMediaPhoto(media=row["generated_file_id"], caption=accepted_caption),
-                    reply_markup=receiver_status_keyboard(public_id),
+                    reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
                 )
                 receiver_message_id = note_message_id
                 set_receiver_message_for_offer(public_id, note_message_id)
@@ -9450,7 +9964,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 chat_id=receiver_chat_id,
                 photo=row["generated_file_id"],
                 caption=accepted_caption,
-                reply_markup=receiver_status_keyboard(public_id),
+                reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
                 protect_content=PROTECT_CONTENT,
             )
             set_receiver_message_for_offer(public_id, receiver_msg.message_id)
@@ -9468,18 +9982,21 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             str(row["date"]),
             int(row["daily_no"]),
             public_id,
-            "⏳ Your QR offer was accepted. Waiting for receiver update.",
+            tr_chat(int(row["sender_chat_id"]), "sender_offer_accepted"),
             expires_at=str(row["offer_expires_at"] or ""),
             sender_rate=_dec(row["sender_rate_usdt"]),
+            chat_id=int(row["sender_chat_id"]),
         ),
-        reply_markup=sender_notify_keyboard(public_id),
+        reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
     )
+    schedule_qr_expiry_warning_task(context.application, public_id, str(row["offer_expires_at"] or ""))
+
     if auto_off:
         await context.bot.send_message(
             chat_id=receiver_chat_id,
-            text="🔴 Your scan limit reached zero, so you were set offline automatically. Use /on LIMIT to go online again.",
+            text=tr_chat(receiver_chat_id, "auto_off_limit_zero"),
         )
-        await notify_active_senders(context, "🔴 A receiver reached their limit and is now offline. Use /status for current capacity.")
+        await notify_active_senders(context, tr_chat(None, "sender_notify_limit_zero"))
 
 
 async def cancel_order_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9511,6 +10028,7 @@ async def cancel_order_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         int(row["daily_no"]),
         public_id,
         tr_chat(sender_chat_id, "cancel_order_status_line"),
+        chat_id=sender_chat_id,
     )
     try:
         await context.bot.edit_message_caption(
@@ -9572,22 +10090,23 @@ async def notify_receiver_button(update: Update, context: ContextTypes.DEFAULT_T
         expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
         if expired_ok and expired_row is not None:
             await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
-        await query.answer("This QR has expired.", show_alert=True)
+        await query.answer(tr_chat(sender_chat_id, "qr_expired_alert"), show_alert=True)
         return
 
     try:
         await context.bot.send_message(
             chat_id=receiver_chat_id,
-            text=(
-                "🔔 Sender reminder\n"
-                f"🆔 QR ID: {public_id}\n"
-                f"⏱ Expires: {display_datetime(str(row['offer_expires_at'] or ''))}\n\n"
-                "Please complete this pending QR or mark it failed."
+            text=tr_chat(
+                receiver_chat_id,
+                "sender_reminder",
+                public_id=public_id,
+                expires=display_datetime(str(row['offer_expires_at'] or '')),
+                time_left=format_time_left_for_chat(receiver_chat_id, row["offer_expires_at"]),
             ),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📥 Open pending QR", callback_data=f"pendingqr:{public_id}")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(receiver_chat_id, "btn_open_pending_qr"), callback_data=f"pendingqr:{public_id}")]]),
             protect_content=PROTECT_CONTENT,
         )
-        await query.answer("Receiver notified.", show_alert=False)
+        await query.answer(tr_chat(sender_chat_id, "receiver_notified"), show_alert=False)
     except TelegramError as exc:
         logger.warning("Could not notify receiver %s for QR %s: %s", receiver_chat_id, public_id, exc)
         await query.answer("Could not notify the receiver right now.", show_alert=True)
@@ -9618,7 +10137,7 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
         if expired_ok and expired_row is not None:
             await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
-        await query.answer("This QR has expired.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "qr_expired_alert"), show_alert=True)
         return
     try:
         msg = await context.bot.send_photo(
@@ -9629,12 +10148,13 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 int(row["daily_no"]),
                 public_id,
                 str(row["offer_expires_at"] or ""),
+                chat_id,
             ),
-            reply_markup=receiver_status_keyboard(public_id),
+            reply_markup=receiver_status_keyboard(public_id, chat_id),
             protect_content=PROTECT_CONTENT,
         )
         set_receiver_message_for_offer(public_id, msg.message_id)
-        await query.answer("QR opened below.")
+        await query.answer(tr_chat(chat_id, "qr_opened_below"))
     except TelegramError as exc:
         logger.warning("Could not reopen pending QR %s for %s: %s", public_id, chat_id, exc)
         await query.answer("Could not open that QR right now.", show_alert=True)
@@ -9666,10 +10186,10 @@ async def button_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await query.answer(error or "I could not find that QR.", show_alert=True)
             return
         FAIL_REASON_FLOW.pop(chat_id, None)
-        await query.answer("Select failure reason.", show_alert=False)
+        await query.answer(tr_chat(chat_id, "select_failure_reason_alert"), show_alert=False)
         await query.message.reply_text(
-            f"❌ Select failure reason.\n🆔 ID: {photo.public_id}",
-            reply_markup=failure_reason_keyboard(photo.public_id),
+            tr_chat(chat_id, "select_failure_reason", public_id=photo.public_id),
+            reply_markup=failure_reason_keyboard(photo.public_id, chat_id),
         )
         return
 
@@ -9691,13 +10211,15 @@ async def button_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) -> None:
     expired_at = qr_expiry_status_at(row)
-    expired_offer_text = f"⏱ Offer expired.\n🆔 Offer ID: {public_id}\nThis QR can no longer be accepted or completed."
-    expired_caption = (
-        f"{build_caption(str(row['date']), int(row['daily_no']), public_id)}\n\n"
-        "⏱ Status: EXPIRED\n"
-        f"🕒 Updated: {display_datetime(expired_at)}\n"
-        "💳 Sender reserve released."
-    )
+
+    def expired_caption_for(chat_id: int | None) -> str:
+        return (
+            f"{build_caption(str(row['date']), int(row['daily_no']), public_id, chat_id)}\n\n"
+            f"{tr_chat(chat_id, 'expired_caption_status_line')}\n"
+            f"🕒 {tr_chat(chat_id, 'caption_updated')}: {display_datetime(expired_at)}\n"
+            f"💳 {tr_chat(chat_id, 'caption_sender_reserve_released')}"
+        )
+
     claimed_receiver_id = int(row["receiver_chat_id"] or 0)
     receiver_message_id = int(row["receiver_message_id"] or 0)
 
@@ -9709,14 +10231,14 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
                 await bot.edit_message_caption(
                     chat_id=note_chat_id,
                     message_id=note_message_id,
-                    caption=expired_caption,
+                    caption=expired_caption_for(note_chat_id),
                     reply_markup=None,
                 )
             else:
                 await bot.edit_message_text(
                     chat_id=note_chat_id,
                     message_id=note_message_id,
-                    text=expired_offer_text,
+                    text=tr_chat(note_chat_id, "expired_offer_text", public_id=public_id),
                 )
             set_offer_notification_state(public_id, note_chat_id, "expired")
             await asyncio.sleep(0.02)
@@ -9728,7 +10250,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
             await bot.edit_message_caption(
                 chat_id=claimed_receiver_id,
                 message_id=receiver_message_id,
-                caption=expired_caption,
+                caption=expired_caption_for(claimed_receiver_id),
                 reply_markup=None,
             )
         except TelegramError:
@@ -9736,10 +10258,11 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
 
     try:
         if row["sender_message_id"]:
+            sender_chat_id = int(row["sender_chat_id"])
             await bot.edit_message_caption(
-                chat_id=int(row["sender_chat_id"]),
+                chat_id=sender_chat_id,
                 message_id=int(row["sender_message_id"]),
-                caption=expired_caption,
+                caption=expired_caption_for(sender_chat_id),
                 reply_markup=None,
             )
     except TelegramError:
@@ -9792,32 +10315,35 @@ def expire_pending_qr_in_db(public_id: str) -> tuple[bool, str, sqlite3.Row | No
 
 async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None:
     """Update Telegram messages after an admin manually expires a QR."""
-    expired_offer_text = f"⏱ Offer expired by admin.\n🆔 Offer ID: {public_id}\nThis QR can no longer be accepted or completed."
-    expired_caption = (
-        f"{build_caption(str(row['date']), int(row['daily_no']), public_id)}\n\n"
-        "⏱ Status: EXPIRED BY ADMIN\n"
-        f"🕒 Updated: {display_datetime()}\n"
-        "💳 Sender reserve released."
-    )
+
+    def expired_admin_caption_for(chat_id: int | None) -> str:
+        return (
+            f"{build_caption(str(row['date']), int(row['daily_no']), public_id, chat_id)}\n\n"
+            f"⏱ {tr_chat(chat_id, 'caption_status')}: {tr_chat(chat_id, 'status_expired_by_admin_caps')}\n"
+            f"🕒 {tr_chat(chat_id, 'caption_updated')}: {display_datetime()}\n"
+            f"💳 {tr_chat(chat_id, 'caption_sender_reserve_released')}"
+        )
 
     for note in offer_notifications(public_id):
+        note_chat_id = int(note["receiver_chat_id"])
         try:
             await bot.edit_message_text(
-                chat_id=int(note["receiver_chat_id"]),
+                chat_id=note_chat_id,
                 message_id=int(note["message_id"]),
-                text=expired_offer_text,
+                text=tr_chat(note_chat_id, "expired_offer_text", public_id=public_id),
             )
-            set_offer_notification_state(public_id, int(note["receiver_chat_id"]), "expired")
+            set_offer_notification_state(public_id, note_chat_id, "expired")
             await asyncio.sleep(0.02)
         except TelegramError:
             pass
 
     try:
         if row["sender_message_id"]:
+            sender_id = int(row["sender_chat_id"])
             await bot.edit_message_caption(
-                chat_id=int(row["sender_chat_id"]),
+                chat_id=sender_id,
                 message_id=int(row["sender_message_id"]),
-                caption=expired_caption,
+                caption=expired_admin_caption_for(sender_id),
                 reply_markup=None,
             )
     except TelegramError:
@@ -9829,16 +10355,17 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
             await bot.edit_message_caption(
                 chat_id=receiver_id,
                 message_id=int(row["receiver_message_id"]),
-                caption=expired_caption,
+                caption=expired_admin_caption_for(receiver_id),
                 reply_markup=None,
             )
     except TelegramError:
         pass
 
     try:
+        sender_id = int(row["sender_chat_id"])
         await bot.send_message(
-            chat_id=int(row["sender_chat_id"]),
-            text=f"⏱ Admin expired your pending QR. Reserved balance was released.\n🆔 ID: {public_id}",
+            chat_id=sender_id,
+            text=f"⏱ {tr_chat(sender_id, 'status_expired_by_admin_caps')}\n🆔 {tr_chat(sender_id, 'caption_id')}: {public_id}\n💳 {tr_chat(sender_id, 'caption_sender_reserve_released')}",
             protect_content=PROTECT_CONTENT,
         )
     except TelegramError:
@@ -9848,7 +10375,7 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
         try:
             await bot.send_message(
                 chat_id=receiver_id,
-                text=f"⏱ Admin expired QR {public_id}. It can no longer be marked Done or Failed.",
+                text=f"⏱ {tr_chat(receiver_id, 'status_expired_by_admin_caps')}\n🆔 {tr_chat(receiver_id, 'caption_id')}: {public_id}",
                 protect_content=PROTECT_CONTENT,
             )
         except TelegramError:
@@ -9967,6 +10494,8 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
 async def marketplace_watcher(application: Application) -> None:
     while True:
         try:
+            for row in list_claimed_qrs_needing_expiry_warning(limit=100):
+                await send_receiver_expiry_warning(application.bot, row)
             for row in list_pending_qrs_to_expire(limit=100):
                 public_id = str(row["public_id"])
                 ok, _msg, expired_row = expire_pending_qr_in_db(public_id)
@@ -10401,6 +10930,32 @@ def admin_qr_status_override_form(public_id: str, current_status: str | None) ->
       </form>
     </div>
     '''
+
+
+def admin_qr_force_retry_forms(public_id: str, row: sqlite3.Row) -> str:
+    status = str(row["status"] or "pending").strip().lower()
+    parts: list[str] = []
+    if status != "failed":
+        parts.append(
+            f'''<form class="inline" method="post" action="/admin/qrs/{esc(public_id)}/force-release"
+                 data-confirm-title="Force release this order?" data-confirm-button="Force release" data-confirm-class="danger"
+                 data-confirm-message="This marks the QR as Failed, releases/refunds the sender as needed, deducts receiver earnings if this was Done, and notifies both parties.">
+                 <button class="danger" type="submit">Force release / mark Failed</button></form>'''
+        )
+    if status == "failed" and row["generated_file_id"]:
+        parts.append(
+            f'''<form class="inline" method="post" action="/admin/qrs/{esc(public_id)}/retry"
+                 data-confirm-title="Retry this QR?" data-confirm-button="Retry QR" data-confirm-class="danger"
+                 data-confirm-message="This reopens the same QR as a new marketplace offer, reserves sender balance again, and sends it to online receivers.">
+                 <button type="submit">🔁 Retry QR offer</button></form>'''
+        )
+    if not parts:
+        return ""
+    return '''
+    <div class="admin-status-override">
+      <h3>⚡ Force actions</h3>
+      <p class="muted small">Use these only when an order is stuck or needs manual correction.</p>
+      <div class="action-row">''' + "".join(parts) + "</div></div>"
 
 
 def deposit_status_pill(status: str | None) -> str:
@@ -11081,6 +11636,7 @@ async def admin_qr_detail(request: Request, public_id: str):
             '<button class="danger" type="submit">Expire pending QR</button></form>'
         )
     status_override_form = admin_qr_status_override_form(public_id, row["status"])
+    force_retry_forms = admin_qr_force_retry_forms(public_id, row)
     body = f'''
     <div class="card">
       <h2>🆔 QR Detail</h2>
@@ -11095,6 +11651,7 @@ async def admin_qr_detail(request: Request, public_id: str):
           <p><strong>Processing:</strong> {esc(row["processing_ms"] or 0)} ms</p>
           {expire_form}
           {status_override_form}
+          {force_retry_forms}
         </div>
         <div>
           <p><strong>Sender:</strong><br>{sender_html}</p>
@@ -11151,6 +11708,31 @@ async def admin_qr_status_override(request: Request, public_id: str):
         msg += f" Notifications sent: {sent}, failed: {failed}."
     elif ok:
         msg += " Telegram bot is not ready, so notifications were not sent."
+    return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), msg)
+
+
+@web_app.post("/admin/qrs/{public_id}/force-release")
+async def admin_qr_force_release(request: Request, public_id: str):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    ok, msg, result = admin_override_photo_status(public_id, "failed", failure_reason="Forced release by admin", status_by=0)
+    if ok and result is not None and telegram_application is not None:
+        sent, failed = await notify_admin_order_status_change(telegram_application.bot, result)
+        msg += f" Notifications sent: {sent}, failed: {failed}."
+    elif ok:
+        msg += " Telegram bot is not ready, so notifications were not sent."
+    return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), msg)
+
+
+@web_app.post("/admin/qrs/{public_id}/retry")
+async def admin_qr_retry(request: Request, public_id: str):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    if telegram_application is None:
+        return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), "Telegram bot is not ready; cannot retry QR right now.")
+    ok, msg = await admin_retry_qr_order(telegram_application.bot, public_id)
     return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), msg)
 
 
@@ -13565,6 +14147,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
     if role == "receiver":
         return common + [
             ("on", "Go online with limit"),
+            ("limit", "Add or reduce current limit"),
             ("off", "Go offline"),
             ("pending", "Show pending QRs"),
             ("done", "Mark replied QR done"),
@@ -13578,6 +14161,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
             ("wallet", "Show wallet balance"),
             ("loadwallet", "Top-up your wallet"),
             ("on", "Go online with limit"),
+            ("limit", "Add or reduce current limit"),
             ("off", "Go offline"),
             ("pending", "Show pending QRs"),
             ("done", "Mark replied QR done"),
@@ -13631,6 +14215,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("wallet", wallet_cmd))
     app.add_handler(CommandHandler("loadwallet", loadwallet_cmd))
     app.add_handler(CommandHandler("on", on_cmd))
+    app.add_handler(CommandHandler("limit", limit_cmd))
     app.add_handler(CommandHandler("off", off_cmd))
     app.add_handler(CommandHandler("earnings", earnings_cmd))
     app.add_handler(CommandHandler("withdraw", withdraw_cmd))
