@@ -193,7 +193,7 @@ POLYGON_RPC_BLOCK_CHUNK_SIZE = int(os.getenv("POLYGON_RPC_BLOCK_CHUNK_SIZE", "50
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "").strip()
 MANUAL_VERIFICATION_DELAY_MINUTES = int(os.getenv("MANUAL_VERIFICATION_DELAY_MINUTES", "5"))
 PAYMENT_VERIFY_TASK_TIMEOUT_SECONDS = int(os.getenv("PAYMENT_VERIFY_TASK_TIMEOUT_SECONDS", "60"))
-DEFAULT_SENDER_RATE_USDT = os.getenv("DEFAULT_SENDER_RATE_USDT", "0").strip() or "0"
+DEFAULT_SENDER_RATE_USDT = os.getenv("DEFAULT_SENDER_RATE_USDT", "0.50").strip() or "0.50"
 DEFAULT_RECEIVER_RATE_USDT = os.getenv("DEFAULT_RECEIVER_RATE_USDT", "0").strip() or "0"
 DEFAULT_MIN_PAYOUT_USDT = os.getenv("DEFAULT_MIN_PAYOUT_USDT", "1").strip() or "1"
 DEFAULT_MIN_WALLET_TOPUP_USDT = os.getenv("DEFAULT_MIN_WALLET_TOPUP_USDT", "1").strip() or "1"
@@ -488,10 +488,10 @@ def support_chat_url(contact: str | None = None) -> str | None:
     return None
 
 
-def support_display_text() -> str:
+def support_display_text(chat_id: int | None = None) -> str:
     contact = support_contact_value()
     if not contact:
-        return "Support is not configured yet. Ask the owner to set SUPPORT_USERNAME in .env."
+        return tr_chat(chat_id, "support_not_configured")
     return contact
 
 
@@ -589,7 +589,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "receiver_offline": "🔴 You are offline. New offers will stop until you use /on LIMIT again.",
         "sender_status_only": "/status is only for senders. Use /pending for your QR tasks and /earnings for your balance.",
         "sender_status_only_menu": "/status is only for senders. Use Pending QR and Earnings from the receiver menu.",
-        "notify_receiver_online": "🟢 A receiver is online now.\n📊 Current limit: {limit} scans.\n\nUse /status to see total live capacity.",
+        "notify_receiver_online": "🟢 A receiver is online now.\n📊 Total limit now: {capacity} scans.\n\nUse /status to see total live capacity.",
         "notify_receiver_offline": "🔴 A receiver went offline.\nCheck /status before sending more QR codes.",
         "no_pending_qrs": "No claimed pending QRs.",
         "pending_header": "Your claimed pending QRs:\nTap an ID below to reopen that specific QR.\n",
@@ -664,7 +664,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "registered_receiver": "✅ Anda terdaftar sebagai <b>penerima/pembeli</b>.\n\n🟢 Aktifkan status online saat Anda siap menerima penawaran QR.\n📥 QR yang diterima akan muncul di sini dengan tombol Done/Failed.\n\nGunakan menu di bawah untuk penghasilan, QR tertunda, pesan marketplace, riwayat QR, sengketa, statistik, perintah, bahasa, dan dukungan.",
         "not_registered_menu": "👋 Anda belum terdaftar.\n\n🆔 ID chat Anda: <code>{chat_id}</code>\n\n📩 Kirim ID ini ke dukungan/admin untuk mendapatkan akses.\n\n👤 Dukungan: {support}",
         "commands_title": "📋 Perintah yang tersedia dan cara penggunaan", "commands_role": "Peran: {role}", "commands_general": "Umum:", "cmd_start": "• /start — buka menu utama", "cmd_commands": "• /commands — tampilkan daftar perintah ini", "cmd_language": "• /language — ubah bahasa Anda", "cmd_myid": "• /myid — tampilkan ID chat Telegram dan username Anda", "cmd_support": "• /support — tampilkan kontak dukungan dan tombol buka chat", "cmd_messages": "• /messages — kirim broadcast marketplace preset", "cmd_history": "• /history — tampilkan riwayat QR Anda", "cmd_dispute": "• /dispute — buka sengketa dukungan", "cmd_stats": "• /stats — tampilkan total Anda", "commands_sender": "Pengirim:", "cmd_send_qr": "• Kirim foto QR — buat penawaran scan QR terbuka baru", "cmd_status": "• /status — tampilkan kapasitas penerima marketplace", "cmd_wallet": "• /wallet — tampilkan saldo dompet Anda", "cmd_loadwallet": "• /loadwallet — isi saldo dompet Anda", "commands_receiver": "Penerima:", "cmd_on": "• /on LIMIT — online, contoh: /on 25", "cmd_off": "• /off — offline", "cmd_pending": "• /pending — tampilkan QR tertunda yang sudah Anda klaim", "cmd_done": "• /done — tandai QR yang Anda balas sebagai selesai", "cmd_failed": "• /failed — tandai QR yang Anda balas sebagai gagal dengan memilih alasan", "cmd_earnings": "• /earnings — tampilkan penghasilan penerima", "cmd_withdraw": "• /withdraw — ajukan penarikan", "commands_after_activation": "Setelah admin mengaktifkan akun Anda, daftar ini hanya akan menampilkan perintah sesuai peran Anda.",
-        "support_text": "🛟 Dukungan\n\nKontak: {support}\n\nGunakan tombol di bawah untuk membuka chat dukungan secara langsung.", "username_hidden": "\nUsername: tidak disetel / disembunyikan", "not_registered": "Anda belum terdaftar.", "not_registered_support": "Anda belum terdaftar. Gunakan Dukungan di bawah untuk meminta akses.", "only_active_receivers": "Hanya penerima aktif yang dapat menggunakan ini.", "only_active_receivers_on": "Hanya penerima aktif yang dapat menggunakan /on.", "only_active_receivers_off": "Hanya penerima aktif yang dapat menggunakan /off.", "on_usage": "Penggunaan: /on LIMIT\nContoh: /on 25", "receiver_online": "🟢 Anda online. Limit saat ini: {limit} scan.", "receiver_offline": "🔴 Anda offline. Penawaran baru akan berhenti sampai Anda menggunakan /on LIMIT lagi.", "sender_status_only": "/status hanya untuk pengirim. Gunakan /pending untuk tugas QR Anda dan /earnings untuk saldo Anda.", "sender_status_only_menu": "/status hanya untuk pengirim. Gunakan QR Tertunda dan Penghasilan dari menu penerima.", "notify_receiver_online": "🟢 Ada penerima yang online sekarang.\n📊 Limit saat ini: {limit} scan.\n\nGunakan /status untuk melihat total kapasitas aktif.", "notify_receiver_offline": "🔴 Seorang penerima offline.\nSilakan cek /status sebelum mengirim QR lagi.",
+        "support_text": "🛟 Dukungan\n\nKontak: {support}\n\nGunakan tombol di bawah untuk membuka chat dukungan secara langsung.", "username_hidden": "\nUsername: tidak disetel / disembunyikan", "not_registered": "Anda belum terdaftar.", "not_registered_support": "Anda belum terdaftar. Gunakan Dukungan di bawah untuk meminta akses.", "only_active_receivers": "Hanya penerima aktif yang dapat menggunakan ini.", "only_active_receivers_on": "Hanya penerima aktif yang dapat menggunakan /on.", "only_active_receivers_off": "Hanya penerima aktif yang dapat menggunakan /off.", "on_usage": "Penggunaan: /on LIMIT\nContoh: /on 25", "receiver_online": "🟢 Anda online. Limit saat ini: {limit} scan.", "receiver_offline": "🔴 Anda offline. Penawaran baru akan berhenti sampai Anda menggunakan /on LIMIT lagi.", "sender_status_only": "/status hanya untuk pengirim. Gunakan /pending untuk tugas QR Anda dan /earnings untuk saldo Anda.", "sender_status_only_menu": "/status hanya untuk pengirim. Gunakan QR Tertunda dan Penghasilan dari menu penerima.", "notify_receiver_online": "🟢 Ada penerima yang online sekarang.\n📊 Total limit sekarang: {capacity} scan.\n\nGunakan /status untuk melihat total kapasitas aktif.", "notify_receiver_offline": "🔴 Seorang penerima offline.\nSilakan cek /status sebelum mengirim QR lagi.",
         "no_pending_qrs": "Tidak ada QR tertunda yang diklaim.", "pending_header": "QR tertunda yang Anda klaim:\nKetuk ID di bawah untuk membuka kembali QR tertentu.\n", "history_title": "📜 Riwayat QR", "history_page": "<b>📜 Riwayat QR — Halaman {page}/{total_pages}</b>", "history_showing": "Menampilkan 10 log QR per halaman, terbaru terlebih dahulu.", "history_empty": "Belum ada riwayat QR.", "qr_id": "ID QR", "date_time": "Tanggal/Waktu", "photo_no": "No. Foto", "status": "Status", "charged": "Ditagih", "earned": "Diperoleh", "status_done": "✅ Selesai", "status_failed": "❌ Gagal", "status_expired": "⌛ Kedaluwarsa", "status_pending": "⏳ Tertunda", "btn_prev": "⬅️ Sebelumnya", "btn_next": "Berikutnya ➡️",
         "marketplace_messages_title": "💬 Pesan preset marketplace", "marketplace_messages_text": "Pilih preset di bawah. Pesan akan dikirim ke semua {target} aktif.\nTombol balasan yang mereka ketuk hanya akan kembali kepada Anda.", "target_receivers": "penerima", "target_senders": "pengirim", "preset_private_only": "Silakan gunakan pesan preset hanya di chat pribadi.", "no_presets": "Tidak ada pesan preset yang tersedia untuk peran Anda saat ini.", "preset_menu_wrong_user": "Menu preset ini milik akun lain.", "invalid_preset_button": "Tombol preset tidak valid.", "preset_not_active": "Pesan preset ini tidak aktif lagi.", "preset_not_for_role": "Preset ini tidak tersedia untuk peran Anda.", "no_active_recipients": "Tidak ada {role} aktif saat ini.", "could_not_send_any": "Tidak dapat mengirim ke {role} aktif saat ini.", "sent_failed": "Terkirim ke {sent}. {failed} gagal.", "sent_ok": "Terkirim ✅", "already_answered_closed": "✅ Sudah dijawab.\nPesan marketplace ini ditutup.", "invalid_reply_button": "Tombol balasan tidak valid.", "reply_no_longer_available": "Balasan preset ini tidak tersedia lagi.", "reply_not_for_account": "Tombol balasan ini bukan untuk akun Anda.", "reply_mismatch": "Balasan ini tidak cocok dengan pesan asli.", "reply_not_for_role": "Balasan ini tidak tersedia untuk peran Anda.", "already_answered_other": "Sudah dijawab oleh orang lain.", "marketplace_msg_unavailable": "Pesan marketplace ini tidak tersedia lagi.", "reply_saved_notify_failed": "Balasan disimpan, tetapi pengirim tidak dapat diberi tahu sekarang.", "reply_sent": "Balasan terkirim ✅",
         "receiver_earnings_title": "💰 *Penghasilan penerima*", "total_earned": "Total diperoleh", "paid": "Dibayar", "requested": "Diminta", "available_withdraw": "Tersedia untuk ditarik", "wallet_title": "👛 *Dompet Anda*", "usdt_balance": "💵 Saldo USDT", "reserved": "🔒 Direservasi", "available": "✅ Tersedia", "only_active_senders_wallet": "Hanya pengirim aktif yang dapat menggunakan /wallet.", "only_active_senders_load": "Hanya pengirim aktif yang dapat mengisi saldo dompet.", "only_senders_load": "Hanya pengirim yang dapat mengisi saldo dompet.", "loadwallet_hint": "Gunakan /loadwallet untuk mengisi saldo dompet Anda.", "amount_gt_zero": "Jumlah harus lebih besar dari 0.", "could_not_create_deposit": "Tidak dapat membuat deposit: {error}", "topup_no_methods": "👛 *Isi Saldo Dompet*\n\n⚠️ Belum ada metode pembayaran isi saldo yang dikonfigurasi. Silakan hubungi dukungan.", "topup_choose": "👛 *Isi Saldo Dompet*\n\nPilih cara menambahkan dana:", "only_receivers_pending": "Hanya penerima yang memiliki tugas QR tertunda.", "only_senders_status": "Hanya pengirim yang dapat menggunakan ini."
@@ -673,7 +673,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "private_only": "Vui lòng chỉ sử dụng bot này trong cuộc trò chuyện riêng.", "choose_language": "🌐 Vui lòng chọn ngôn ngữ của bạn.", "language_saved": "✅ Đã đổi ngôn ngữ sang Tiếng Việt.", "language_menu_hint": "Bạn có thể thay đổi bất cứ lúc nào bằng /language.", "btn_open_support": "💬 Mở chat hỗ trợ", "btn_back": "⬅️ Quay lại", "btn_back_menu": "⬅️ Quay lại Menu", "btn_language": "🌐 Ngôn ngữ", "btn_commands": "📋 Lệnh", "btn_support": "🛟 Hỗ trợ", "btn_wallet": "👛 Ví", "btn_status": "📡 Trạng thái", "btn_messages": "💬 Tin nhắn", "btn_history": "📜 Lịch sử QR", "btn_stats": "📊 Thống kê", "btn_dispute": "⚠️ Khiếu nại", "btn_earnings": "💰 Thu nhập", "btn_pending_qr": "📥 QR đang chờ", "btn_topup_wallet": "➕ Nạp ví", "btn_wallet_history": "👛 Lịch sử ví", "btn_withdraw": "💸 Rút tiền",
         "registered_sender": "✅ Bạn đã được đăng ký là <b>người gửi</b>.\n\n📤 Gửi ảnh chứa đúng một mã QR UPI AutoPay.\n🧼 Tôi sẽ tạo lại mã QR sạch và đăng nó dưới dạng lời mời mở cho các người nhận đang online.\n\nDùng menu bên dưới cho ví, tin nhắn marketplace, lịch sử QR, khiếu nại, thống kê, lệnh, ngôn ngữ và hỗ trợ.", "registered_receiver": "✅ Bạn đã được đăng ký là <b>người nhận/người mua</b>.\n\n🟢 Hãy bật online khi bạn sẵn sàng nhận các lời mời QR.\n📥 QR đã nhận sẽ xuất hiện ở đây với các nút Done/Failed.\n\nDùng menu bên dưới cho thu nhập, QR đang chờ, tin nhắn marketplace, lịch sử QR, khiếu nại, thống kê, lệnh, ngôn ngữ và hỗ trợ.", "not_registered_menu": "👋 Bạn chưa được đăng ký.\n\n🆔 ID chat của bạn: <code>{chat_id}</code>\n\n📩 Gửi ID này cho hỗ trợ/admin để được cấp quyền truy cập.\n\n👤 Hỗ trợ: {support}",
         "commands_title": "📋 Các lệnh có sẵn và cách dùng", "commands_role": "Vai trò: {role}", "commands_general": "Chung:", "cmd_start": "• /start — mở menu chính", "cmd_commands": "• /commands — hiển thị danh sách lệnh", "cmd_language": "• /language — đổi ngôn ngữ", "cmd_myid": "• /myid — hiển thị ID chat Telegram và username", "cmd_support": "• /support — hiển thị liên hệ hỗ trợ và nút mở chat", "cmd_messages": "• /messages — gửi broadcast marketplace preset", "cmd_history": "• /history — hiển thị lịch sử QR", "cmd_dispute": "• /dispute — mở khiếu nại hỗ trợ", "cmd_stats": "• /stats — hiển thị tổng của bạn", "commands_sender": "Người gửi:", "cmd_send_qr": "• Gửi ảnh QR — tạo lời mời quét QR mở mới", "cmd_status": "• /status — hiển thị sức chứa người nhận trên marketplace", "cmd_wallet": "• /wallet — hiển thị số dư ví", "cmd_loadwallet": "• /loadwallet — nạp ví", "commands_receiver": "Người nhận:", "cmd_on": "• /on LIMIT — bật online, ví dụ: /on 25", "cmd_off": "• /off — tắt online", "cmd_pending": "• /pending — hiển thị QR đang chờ bạn đã nhận", "cmd_done": "• /done — đánh dấu QR bạn đã trả lời là hoàn tất", "cmd_failed": "• /failed — đánh dấu QR bạn đã trả lời là thất bại bằng cách chọn lý do", "cmd_earnings": "• /earnings — hiển thị thu nhập người nhận", "cmd_withdraw": "• /withdraw — yêu cầu rút tiền", "commands_after_activation": "Sau khi admin kích hoạt tài khoản, danh sách này sẽ chỉ hiển thị các lệnh cho vai trò của bạn.",
-        "support_text": "🛟 Hỗ trợ\n\nLiên hệ: {support}\n\nDùng nút bên dưới để mở chat hỗ trợ trực tiếp.", "username_hidden": "\nUsername: chưa đặt / bị ẩn", "not_registered": "Bạn chưa được đăng ký.", "not_registered_support": "Bạn chưa được đăng ký. Dùng Hỗ trợ bên dưới để yêu cầu truy cập.", "only_active_receivers": "Chỉ người nhận đang hoạt động mới có thể dùng mục này.", "only_active_receivers_on": "Chỉ người nhận đang hoạt động mới có thể dùng /on.", "only_active_receivers_off": "Chỉ người nhận đang hoạt động mới có thể dùng /off.", "on_usage": "Cách dùng: /on LIMIT\nVí dụ: /on 25", "receiver_online": "🟢 Bạn đang online. Giới hạn hiện tại: {limit} lượt scan.", "receiver_offline": "🔴 Bạn đã offline. Lời mời mới sẽ dừng cho đến khi bạn dùng /on LIMIT lại.", "sender_status_only": "/status chỉ dành cho người gửi. Dùng /pending cho tác vụ QR và /earnings cho số dư của bạn.", "sender_status_only_menu": "/status chỉ dành cho người gửi. Dùng QR đang chờ và Thu nhập trong menu người nhận.", "notify_receiver_online": "🟢 Hiện có người nhận đang online.\n📊 Giới hạn hiện tại: {limit} lượt scan.\n\nDùng /status để xem tổng sức chứa đang hoạt động.", "notify_receiver_offline": "🔴 Một người nhận đã offline.\nVui lòng kiểm tra /status trước khi gửi thêm QR.",
+        "support_text": "🛟 Hỗ trợ\n\nLiên hệ: {support}\n\nDùng nút bên dưới để mở chat hỗ trợ trực tiếp.", "username_hidden": "\nUsername: chưa đặt / bị ẩn", "not_registered": "Bạn chưa được đăng ký.", "not_registered_support": "Bạn chưa được đăng ký. Dùng Hỗ trợ bên dưới để yêu cầu truy cập.", "only_active_receivers": "Chỉ người nhận đang hoạt động mới có thể dùng mục này.", "only_active_receivers_on": "Chỉ người nhận đang hoạt động mới có thể dùng /on.", "only_active_receivers_off": "Chỉ người nhận đang hoạt động mới có thể dùng /off.", "on_usage": "Cách dùng: /on LIMIT\nVí dụ: /on 25", "receiver_online": "🟢 Bạn đang online. Giới hạn hiện tại: {limit} lượt scan.", "receiver_offline": "🔴 Bạn đã offline. Lời mời mới sẽ dừng cho đến khi bạn dùng /on LIMIT lại.", "sender_status_only": "/status chỉ dành cho người gửi. Dùng /pending cho tác vụ QR và /earnings cho số dư của bạn.", "sender_status_only_menu": "/status chỉ dành cho người gửi. Dùng QR đang chờ và Thu nhập trong menu người nhận.", "notify_receiver_online": "🟢 Hiện có người nhận đang online.\n📊 Tổng hạn mức hiện tại: {capacity} lượt quét.\n\nDùng /status để xem tổng sức chứa đang hoạt động.", "notify_receiver_offline": "🔴 Một người nhận đã offline.\nVui lòng kiểm tra /status trước khi gửi thêm QR.",
         "no_pending_qrs": "Không có QR đang chờ đã nhận.", "pending_header": "Các QR đang chờ bạn đã nhận:\nNhấn một ID bên dưới để mở lại QR cụ thể đó.\n", "history_title": "📜 Lịch sử QR", "history_page": "<b>📜 Lịch sử QR — Trang {page}/{total_pages}</b>", "history_showing": "Hiển thị 10 nhật ký QR mỗi trang, mới nhất trước.", "history_empty": "Chưa có lịch sử QR.", "qr_id": "ID QR", "date_time": "Ngày/Giờ", "photo_no": "Số ảnh", "status": "Trạng thái", "charged": "Đã tính phí", "earned": "Đã kiếm", "status_done": "✅ Hoàn tất", "status_failed": "❌ Thất bại", "status_expired": "⌛ Hết hạn", "status_pending": "⏳ Đang chờ", "btn_prev": "⬅️ Trước", "btn_next": "Tiếp ➡️",
         "marketplace_messages_title": "💬 Tin nhắn preset marketplace", "marketplace_messages_text": "Chọn một preset bên dưới. Tin nhắn sẽ được gửi đến tất cả {target} đang hoạt động.\nBất kỳ nút trả lời nào họ nhấn sẽ chỉ gửi lại cho bạn.", "target_receivers": "người nhận", "target_senders": "người gửi", "preset_private_only": "Vui lòng chỉ dùng tin nhắn preset trong chat riêng.", "no_presets": "Hiện không có tin nhắn preset nào cho vai trò của bạn.", "preset_menu_wrong_user": "Menu preset này thuộc về tài khoản khác.", "invalid_preset_button": "Nút preset không hợp lệ.", "preset_not_active": "Tin nhắn preset này không còn hoạt động.", "preset_not_for_role": "Preset này không khả dụng cho vai trò của bạn.", "no_active_recipients": "Hiện không có {role} đang hoạt động.", "could_not_send_any": "Không thể gửi cho bất kỳ {role} đang hoạt động nào lúc này.", "sent_failed": "Đã gửi cho {sent}. {failed} lỗi.", "sent_ok": "Đã gửi ✅", "already_answered_closed": "✅ Đã được trả lời.\nTin nhắn marketplace này đã đóng.", "invalid_reply_button": "Nút trả lời không hợp lệ.", "reply_no_longer_available": "Trả lời preset này không còn khả dụng.", "reply_not_for_account": "Nút trả lời này không dành cho tài khoản của bạn.", "reply_mismatch": "Trả lời này không khớp với tin nhắn gốc.", "reply_not_for_role": "Trả lời này không khả dụng cho vai trò của bạn.", "already_answered_other": "Đã có người khác trả lời.", "marketplace_msg_unavailable": "Tin nhắn marketplace này không còn khả dụng.", "reply_saved_notify_failed": "Đã lưu trả lời, nhưng hiện không thể thông báo cho người gửi.", "reply_sent": "Đã gửi trả lời ✅",
         "receiver_earnings_title": "💰 *Thu nhập người nhận*", "total_earned": "Tổng thu nhập", "paid": "Đã trả", "requested": "Đã yêu cầu", "available_withdraw": "Có thể rút", "wallet_title": "👛 *Ví của bạn*", "usdt_balance": "💵 Số dư USDT", "reserved": "🔒 Đang giữ", "available": "✅ Khả dụng", "only_active_senders_wallet": "Chỉ người gửi đang hoạt động mới có thể dùng /wallet.", "only_active_senders_load": "Chỉ người gửi đang hoạt động mới có thể nạp ví.", "only_senders_load": "Chỉ người gửi mới có thể nạp ví.", "loadwallet_hint": "Dùng /loadwallet để nạp ví.", "amount_gt_zero": "Số tiền phải lớn hơn 0.", "could_not_create_deposit": "Không thể tạo khoản nạp: {error}", "topup_no_methods": "👛 *Nạp ví*\n\n⚠️ Hiện chưa cấu hình phương thức nạp ví. Vui lòng liên hệ hỗ trợ.", "topup_choose": "👛 *Nạp ví*\n\nChọn cách bạn muốn thêm tiền:", "only_receivers_pending": "Chỉ người nhận mới có tác vụ QR đang chờ.", "only_senders_status": "Chỉ người gửi mới có thể dùng mục này."
@@ -682,7 +682,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "private_only": "请只在私聊中使用此机器人。", "choose_language": "🌐 请选择您的语言。", "language_saved": "✅ 语言已更新为中文。", "language_menu_hint": "您可以随时使用 /language 更改。", "btn_open_support": "💬 打开客服聊天", "btn_back": "⬅️ 返回", "btn_back_menu": "⬅️ 返回菜单", "btn_language": "🌐 语言", "btn_commands": "📋 命令", "btn_support": "🛟 客服", "btn_wallet": "👛 钱包", "btn_status": "📡 状态", "btn_messages": "💬 消息", "btn_history": "📜 QR 历史", "btn_stats": "📊 统计", "btn_dispute": "⚠️ 申诉", "btn_earnings": "💰 收益", "btn_pending_qr": "📥 待处理 QR", "btn_topup_wallet": "➕ 钱包充值", "btn_wallet_history": "👛 钱包历史", "btn_withdraw": "💸 提现",
         "registered_sender": "✅ 您已注册为<b>发送方</b>。\n\n📤 请发送一张只包含一个 UPI AutoPay QR 码的照片。\n🧼 我会把它重新生成干净的 QR，并作为公开任务发送给在线接收方。\n\n请使用下方菜单查看钱包、市场消息、QR 历史、申诉、统计、命令、语言和客服。", "registered_receiver": "✅ 您已注册为<b>接收方/买家</b>。\n\n🟢 准备好接收 QR 任务时请上线。\n📥 接收的 QR 会显示在这里，并带有 Done/Failed 按钮。\n\n请使用下方菜单查看收益、待处理 QR、市场消息、QR 历史、申诉、统计、命令、语言和客服。", "not_registered_menu": "👋 您尚未注册。\n\n🆔 您的聊天 ID：<code>{chat_id}</code>\n\n📩 请把此 ID 发送给客服/admin 以获取访问权限。\n\n👤 客服：{support}",
         "commands_title": "📋 可用命令和用法", "commands_role": "角色：{role}", "commands_general": "通用：", "cmd_start": "• /start — 打开主菜单", "cmd_commands": "• /commands — 显示此命令列表", "cmd_language": "• /language — 更改语言", "cmd_myid": "• /myid — 显示您的 Telegram 聊天 ID 和用户名", "cmd_support": "• /support — 显示客服联系方式和打开聊天按钮", "cmd_messages": "• /messages — 发送预设市场广播", "cmd_history": "• /history — 显示您的 QR 历史", "cmd_dispute": "• /dispute — 打开客服申诉", "cmd_stats": "• /stats — 显示您的总计", "commands_sender": "发送方：", "cmd_send_qr": "• 发送 QR 照片 — 创建新的公开 QR 扫描任务", "cmd_status": "• /status — 显示市场接收方容量", "cmd_wallet": "• /wallet — 显示钱包余额", "cmd_loadwallet": "• /loadwallet — 给钱包充值", "commands_receiver": "接收方：", "cmd_on": "• /on LIMIT — 上线，例如：/on 25", "cmd_off": "• /off — 下线", "cmd_pending": "• /pending — 显示您已领取的待处理 QR", "cmd_done": "• /done — 将您回复的 QR 标记为完成", "cmd_failed": "• /failed — 选择原因并将您回复的 QR 标记为失败", "cmd_earnings": "• /earnings — 显示接收方收益", "cmd_withdraw": "• /withdraw — 申请提现", "commands_after_activation": "管理员激活您的账户后，此列表将只显示适合您角色的命令。",
-        "support_text": "🛟 客服\n\n联系方式：{support}\n\n使用下方按钮直接打开客服聊天。", "username_hidden": "\n用户名：未设置 / 已隐藏", "not_registered": "您尚未注册。", "not_registered_support": "您尚未注册。请使用下方客服申请访问权限。", "only_active_receivers": "只有活跃接收方可以使用此功能。", "only_active_receivers_on": "只有活跃接收方可以使用 /on。", "only_active_receivers_off": "只有活跃接收方可以使用 /off。", "on_usage": "用法：/on LIMIT\n示例：/on 25", "receiver_online": "🟢 您已上线。当前限制：{limit} 次扫描。", "receiver_offline": "🔴 您已下线。新任务会停止，直到您再次使用 /on LIMIT。", "sender_status_only": "/status 仅供发送方使用。请使用 /pending 查看 QR 任务，使用 /earnings 查看余额。", "sender_status_only_menu": "/status 仅供发送方使用。请从接收方菜单使用待处理 QR 和收益。", "notify_receiver_online": "🟢 现在有接收方在线。\n📊 当前限制：{limit} 次扫描。\n\n使用 /status 查看总实时容量。", "notify_receiver_offline": "🔴 一位接收方已下线。\n发送更多 QR 前请检查 /status。",
+        "support_text": "🛟 客服\n\n联系方式：{support}\n\n使用下方按钮直接打开客服聊天。", "username_hidden": "\n用户名：未设置 / 已隐藏", "not_registered": "您尚未注册。", "not_registered_support": "您尚未注册。请使用下方客服申请访问权限。", "only_active_receivers": "只有活跃接收方可以使用此功能。", "only_active_receivers_on": "只有活跃接收方可以使用 /on。", "only_active_receivers_off": "只有活跃接收方可以使用 /off。", "on_usage": "用法：/on LIMIT\n示例：/on 25", "receiver_online": "🟢 您已上线。当前限制：{limit} 次扫描。", "receiver_offline": "🔴 您已下线。新任务会停止，直到您再次使用 /on LIMIT。", "sender_status_only": "/status 仅供发送方使用。请使用 /pending 查看 QR 任务，使用 /earnings 查看余额。", "sender_status_only_menu": "/status 仅供发送方使用。请从接收方菜单使用待处理 QR 和收益。", "notify_receiver_online": "🟢 现在有接收方在线。\n📊 当前总额度：{capacity} 次扫描。\n\n使用 /status 查看总实时容量。", "notify_receiver_offline": "🔴 一位接收方已下线。\n发送更多 QR 前请检查 /status。",
         "no_pending_qrs": "没有已领取的待处理 QR。", "pending_header": "您已领取的待处理 QR：\n点击下方 ID 重新打开对应 QR。\n", "history_title": "📜 QR 历史", "history_page": "<b>📜 QR 历史 — 第 {page}/{total_pages} 页</b>", "history_showing": "每页显示 10 条 QR 记录，最新优先。", "history_empty": "暂无 QR 历史。", "qr_id": "QR ID", "date_time": "日期/时间", "photo_no": "照片编号", "status": "状态", "charged": "已扣款", "earned": "已赚取", "status_done": "✅ 已完成", "status_failed": "❌ 失败", "status_expired": "⌛ 已过期", "status_pending": "⏳ 待处理", "btn_prev": "⬅️ 上一页", "btn_next": "下一页 ➡️",
         "marketplace_messages_title": "💬 市场预设消息", "marketplace_messages_text": "请选择下方预设。它会发送给所有活跃的{target}。\n他们点击的任何回复按钮只会返回给您。", "target_receivers": "接收方", "target_senders": "发送方", "preset_private_only": "请只在私聊中使用预设消息。", "no_presets": "目前没有适合您角色的预设消息。", "preset_menu_wrong_user": "此预设菜单属于另一个账户。", "invalid_preset_button": "无效的预设按钮。", "preset_not_active": "此预设消息不再可用。", "preset_not_for_role": "此预设不适用于您的角色。", "no_active_recipients": "目前没有活跃{role}。", "could_not_send_any": "目前无法发送给任何活跃{role}。", "sent_failed": "已发送给 {sent} 个用户，{failed} 个失败。", "sent_ok": "已发送 ✅", "already_answered_closed": "✅ 已回复。\n此市场消息已关闭。", "invalid_reply_button": "无效的回复按钮。", "reply_no_longer_available": "此预设回复不再可用。", "reply_not_for_account": "此回复按钮不属于您的账户。", "reply_mismatch": "此回复与原始消息不匹配。", "reply_not_for_role": "此回复不适用于您的角色。", "already_answered_other": "已被其他人回复。", "marketplace_msg_unavailable": "此市场消息不再可用。", "reply_saved_notify_failed": "回复已保存，但现在无法通知发送方。", "reply_sent": "回复已发送 ✅",
         "receiver_earnings_title": "💰 *接收方收益*", "total_earned": "总收益", "paid": "已支付", "requested": "已申请", "available_withdraw": "可提现", "wallet_title": "👛 *您的钱包*", "usdt_balance": "💵 USDT 余额", "reserved": "🔒 已预留", "available": "✅ 可用", "only_active_senders_wallet": "只有活跃发送方可以使用 /wallet。", "only_active_senders_load": "只有活跃发送方可以给钱包充值。", "only_senders_load": "只有发送方可以给钱包充值。", "loadwallet_hint": "请使用 /loadwallet 给钱包充值。", "amount_gt_zero": "金额必须大于 0。", "could_not_create_deposit": "无法创建充值：{error}", "topup_no_methods": "👛 *钱包充值*\n\n⚠️ 目前没有配置钱包充值付款方式。请联系客服。", "topup_choose": "👛 *钱包充值*\n\n请选择添加资金的方式：", "only_receivers_pending": "只有接收方有待处理 QR 任务。", "only_senders_status": "只有发送方可以使用此功能。"
@@ -691,7 +691,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "private_only": "Usa este bot solo en un chat privado.", "choose_language": "🌐 Elige tu idioma.", "language_saved": "✅ Idioma actualizado a español.", "language_menu_hint": "Puedes cambiarlo en cualquier momento con /language.", "btn_open_support": "💬 Abrir chat de soporte", "btn_back": "⬅️ Volver", "btn_back_menu": "⬅️ Volver al menú", "btn_language": "🌐 Idioma", "btn_commands": "📋 Comandos", "btn_support": "🛟 Soporte", "btn_wallet": "👛 Billetera", "btn_status": "📡 Estado", "btn_messages": "💬 Mensajes", "btn_history": "📜 Historial QR", "btn_stats": "📊 Estadísticas", "btn_dispute": "⚠️ Disputa", "btn_earnings": "💰 Ganancias", "btn_pending_qr": "📥 QR pendientes", "btn_topup_wallet": "➕ Recargar billetera", "btn_wallet_history": "👛 Historial de billetera", "btn_withdraw": "💸 Retirar",
         "registered_sender": "✅ Estás registrado como <b>remitente</b>.\n\n📤 Envía una foto que contenga exactamente un código QR de UPI AutoPay.\n🧼 Lo reconstruiré como un QR limpio y lo publicaré como una oferta abierta para los receptores en línea.\n\nUsa el menú de abajo para billetera, mensajes del marketplace, historial QR, disputas, estadísticas, comandos, idioma y soporte.", "registered_receiver": "✅ Estás registrado como <b>receptor/comprador</b>.\n\n🟢 Ponte en línea cuando estés listo para recibir ofertas QR.\n📥 Los QR aceptados aparecerán aquí con botones Done/Failed.\n\nUsa el menú de abajo para ganancias, QR pendientes, mensajes del marketplace, historial QR, disputas, estadísticas, comandos, idioma y soporte.", "not_registered_menu": "👋 Aún no estás registrado.\n\n🆔 Tu ID de chat: <code>{chat_id}</code>\n\n📩 Envía este ID a soporte/admin para obtener acceso.\n\n👤 Soporte: {support}",
         "commands_title": "📋 Comandos disponibles y uso", "commands_role": "Rol: {role}", "commands_general": "General:", "cmd_start": "• /start — abrir el menú principal", "cmd_commands": "• /commands — mostrar esta lista de comandos", "cmd_language": "• /language — cambiar tu idioma", "cmd_myid": "• /myid — mostrar tu ID de chat de Telegram y usuario", "cmd_support": "• /support — mostrar contacto de soporte y botón para abrir chat", "cmd_messages": "• /messages — enviar un broadcast predefinido del marketplace", "cmd_history": "• /history — mostrar tu historial QR", "cmd_dispute": "• /dispute — abrir una disputa de soporte", "cmd_stats": "• /stats — mostrar tus totales", "commands_sender": "Remitente:", "cmd_send_qr": "• Enviar una foto QR — crear una nueva oferta abierta de escaneo QR", "cmd_status": "• /status — mostrar la capacidad de receptores del marketplace", "cmd_wallet": "• /wallet — mostrar el saldo de tu billetera", "cmd_loadwallet": "• /loadwallet — recargar tu billetera", "commands_receiver": "Receptor:", "cmd_on": "• /on LIMIT — ponerse en línea, ejemplo: /on 25", "cmd_off": "• /off — ponerse fuera de línea", "cmd_pending": "• /pending — mostrar tus QR pendientes reclamados", "cmd_done": "• /done — marcar como hecho el QR al que respondiste", "cmd_failed": "• /failed — marcar como fallido el QR al que respondiste eligiendo un motivo", "cmd_earnings": "• /earnings — mostrar ganancias del receptor", "cmd_withdraw": "• /withdraw — solicitar retiro", "commands_after_activation": "Después de que el admin active tu cuenta, esta lista mostrará solo los comandos de tu rol.",
-        "support_text": "🛟 Soporte\n\nContacto: {support}\n\nUsa el botón de abajo para abrir directamente el chat de soporte.", "username_hidden": "\nUsuario: no configurado / oculto", "not_registered": "Aún no estás registrado.", "not_registered_support": "Aún no estás registrado. Usa Soporte abajo para solicitar acceso.", "only_active_receivers": "Solo los receptores activos pueden usar esto.", "only_active_receivers_on": "Solo los receptores activos pueden usar /on.", "only_active_receivers_off": "Solo los receptores activos pueden usar /off.", "on_usage": "Uso: /on LIMIT\nEjemplo: /on 25", "receiver_online": "🟢 Estás en línea. Límite actual: {limit} escaneos.", "receiver_offline": "🔴 Estás fuera de línea. Las nuevas ofertas se detendrán hasta que uses /on LIMIT otra vez.", "sender_status_only": "/status es solo para remitentes. Usa /pending para tus tareas QR y /earnings para tu saldo.", "sender_status_only_menu": "/status es solo para remitentes. Usa QR pendientes y Ganancias desde el menú de receptor.", "notify_receiver_online": "🟢 Un receptor está en línea ahora.\n📊 Límite actual: {limit} escaneos.\n\nUsa /status para ver la capacidad total en vivo.", "notify_receiver_offline": "🔴 Un receptor se desconectó.\nRevisa /status antes de enviar más QR.",
+        "support_text": "🛟 Soporte\n\nContacto: {support}\n\nUsa el botón de abajo para abrir directamente el chat de soporte.", "username_hidden": "\nUsuario: no configurado / oculto", "not_registered": "Aún no estás registrado.", "not_registered_support": "Aún no estás registrado. Usa Soporte abajo para solicitar acceso.", "only_active_receivers": "Solo los receptores activos pueden usar esto.", "only_active_receivers_on": "Solo los receptores activos pueden usar /on.", "only_active_receivers_off": "Solo los receptores activos pueden usar /off.", "on_usage": "Uso: /on LIMIT\nEjemplo: /on 25", "receiver_online": "🟢 Estás en línea. Límite actual: {limit} escaneos.", "receiver_offline": "🔴 Estás fuera de línea. Las nuevas ofertas se detendrán hasta que uses /on LIMIT otra vez.", "sender_status_only": "/status es solo para remitentes. Usa /pending para tus tareas QR y /earnings para tu saldo.", "sender_status_only_menu": "/status es solo para remitentes. Usa QR pendientes y Ganancias desde el menú de receptor.", "notify_receiver_online": "🟢 Un receptor está en línea ahora.\n📊 Límite total ahora: {capacity} escaneos.\n\nUsa /status para ver la capacidad total en vivo.", "notify_receiver_offline": "🔴 Un receptor se desconectó.\nRevisa /status antes de enviar más QR.",
         "no_pending_qrs": "No hay QR pendientes reclamados.", "pending_header": "Tus QR pendientes reclamados:\nToca un ID abajo para volver a abrir ese QR específico.\n", "history_title": "📜 Historial QR", "history_page": "<b>📜 Historial QR — Página {page}/{total_pages}</b>", "history_showing": "Mostrando 10 registros QR por página, los más nuevos primero.", "history_empty": "Aún no hay historial QR.", "qr_id": "ID QR", "date_time": "Fecha/Hora", "photo_no": "N.º de foto", "status": "Estado", "charged": "Cobrado", "earned": "Ganado", "status_done": "✅ Hecho", "status_failed": "❌ Fallido", "status_expired": "⌛ Vencido", "status_pending": "⏳ Pendiente", "btn_prev": "⬅️ Anterior", "btn_next": "Siguiente ➡️",
         "marketplace_messages_title": "💬 Mensajes predefinidos del marketplace", "marketplace_messages_text": "Elige un preset abajo. Se enviará a todos los {target} activos.\nCualquier botón de respuesta que toquen volverá solo a ti.", "target_receivers": "receptores", "target_senders": "remitentes", "preset_private_only": "Usa los mensajes predefinidos solo en chat privado.", "no_presets": "No hay mensajes predefinidos disponibles para tu rol ahora mismo.", "preset_menu_wrong_user": "Este menú predefinido pertenece a otra cuenta.", "invalid_preset_button": "Botón predefinido inválido.", "preset_not_active": "Este mensaje predefinido ya no está activo.", "preset_not_for_role": "Este preset no está disponible para tu rol.", "no_active_recipients": "No se encontraron {role} activos ahora mismo.", "could_not_send_any": "No se pudo enviar a ningún {role} activo ahora mismo.", "sent_failed": "Enviado a {sent}. {failed} fallaron.", "sent_ok": "Enviado ✅", "already_answered_closed": "✅ Ya respondido.\nEste mensaje del marketplace está cerrado.", "invalid_reply_button": "Botón de respuesta inválido.", "reply_no_longer_available": "Esta respuesta predefinida ya no está disponible.", "reply_not_for_account": "Este botón de respuesta no es para tu cuenta.", "reply_mismatch": "Esta respuesta no coincide con el mensaje original.", "reply_not_for_role": "Esta respuesta no está disponible para tu rol.", "already_answered_other": "Ya respondió otra persona.", "marketplace_msg_unavailable": "Este mensaje del marketplace ya no está disponible.", "reply_saved_notify_failed": "Respuesta guardada, pero no se pudo notificar al remitente ahora mismo.", "reply_sent": "Respuesta enviada ✅",
         "receiver_earnings_title": "💰 *Ganancias del receptor*", "total_earned": "Total ganado", "paid": "Pagado", "requested": "Solicitado", "available_withdraw": "Disponible para retirar", "wallet_title": "👛 *Tu billetera*", "usdt_balance": "💵 Saldo USDT", "reserved": "🔒 Reservado", "available": "✅ Disponible", "only_active_senders_wallet": "Solo los remitentes activos pueden usar /wallet.", "only_active_senders_load": "Solo los remitentes activos pueden recargar la billetera.", "only_senders_load": "Solo los remitentes pueden recargar la billetera.", "loadwallet_hint": "Usa /loadwallet para recargar tu billetera.", "amount_gt_zero": "El monto debe ser mayor que 0.", "could_not_create_deposit": "No se pudo crear el depósito: {error}", "topup_no_methods": "👛 *Recargar billetera*\n\n⚠️ No hay métodos de pago de recarga configurados ahora mismo. Contacta con soporte.", "topup_choose": "👛 *Recargar billetera*\n\nElige cómo quieres añadir fondos:", "only_receivers_pending": "Solo los receptores tienen tareas QR pendientes.", "only_senders_status": "Solo los remitentes pueden usar esto."
@@ -934,6 +934,8 @@ _LIMIT_TRANSLATIONS: dict[str, dict[str, str]] = {
         "limit_adjusted": "✅ Receiver limit updated.\nChange: {delta} scans\nCurrent remaining limit: {remaining} / {total} scans.",
         "limit_adjusted_offline": "✅ Receiver limit updated.\nChange: {delta} scans\nCurrent remaining limit is 0, so you are now offline. Use /on LIMIT to go online again.",
         "limit_delta_zero": "Limit change cannot be 0. Use /limit +5 or /limit -5.",
+        "notify_receiver_limit_added": "🟢 Receiver limit added.\n➕ Limit added: {change} scans\n📊 Total limit now: {capacity} scans.\n\nUse /status to see total live capacity.",
+        "notify_receiver_limit_reduced": "🟠 Receiver limit reduced.\n➖ Limit reduced: {change} scans\n📊 Total limit now: {capacity} scans.\n\nUse /status to see total live capacity.",
     },
     "id": {
         "cmd_limit": "• /limit +5 atau /limit -5 — tambah atau kurangi limit scan penerima saat ini",
@@ -943,6 +945,8 @@ _LIMIT_TRANSLATIONS: dict[str, dict[str, str]] = {
         "limit_adjusted": "✅ Limit penerima diperbarui.\nPerubahan: {delta} scan\nSisa limit saat ini: {remaining} / {total} scan.",
         "limit_adjusted_offline": "✅ Limit penerima diperbarui.\nPerubahan: {delta} scan\nSisa limit saat ini 0, jadi Anda sekarang offline. Gunakan /on LIMIT untuk online lagi.",
         "limit_delta_zero": "Perubahan limit tidak boleh 0. Gunakan /limit +5 atau /limit -5.",
+        "notify_receiver_limit_added": "🟢 Limit penerima ditambahkan.\n➕ Limit ditambahkan: {change} scan\n📊 Total limit sekarang: {capacity} scan.\n\nGunakan /status untuk melihat total kapasitas aktif.",
+        "notify_receiver_limit_reduced": "🟠 Limit penerima dikurangi.\n➖ Limit dikurangi: {change} scan\n📊 Total limit sekarang: {capacity} scan.\n\nGunakan /status untuk melihat total kapasitas aktif.",
     },
     "vi": {
         "cmd_limit": "• /limit +5 hoặc /limit -5 — tăng hoặc giảm hạn mức quét hiện tại của người nhận",
@@ -952,6 +956,8 @@ _LIMIT_TRANSLATIONS: dict[str, dict[str, str]] = {
         "limit_adjusted": "✅ Hạn mức người nhận đã được cập nhật.\nThay đổi: {delta} lượt quét\nHạn mức còn lại hiện tại: {remaining} / {total} lượt quét.",
         "limit_adjusted_offline": "✅ Hạn mức người nhận đã được cập nhật.\nThay đổi: {delta} lượt quét\nHạn mức còn lại hiện tại là 0, nên bạn hiện đang offline. Dùng /on LIMIT để online lại.",
         "limit_delta_zero": "Mức thay đổi không được là 0. Dùng /limit +5 hoặc /limit -5.",
+        "notify_receiver_limit_added": "🟢 Hạn mức người nhận đã được tăng.\n➕ Đã tăng hạn mức: {change} lượt quét\n📊 Tổng hạn mức hiện tại: {capacity} lượt quét.\n\nDùng /status để xem tổng sức chứa đang hoạt động.",
+        "notify_receiver_limit_reduced": "🟠 Hạn mức người nhận đã được giảm.\n➖ Đã giảm hạn mức: {change} lượt quét\n📊 Tổng hạn mức hiện tại: {capacity} lượt quét.\n\nDùng /status để xem tổng sức chứa đang hoạt động.",
     },
     "zh": {
         "cmd_limit": "• /limit +5 或 /limit -5 — 增加或减少当前接收方扫描额度",
@@ -961,6 +967,8 @@ _LIMIT_TRANSLATIONS: dict[str, dict[str, str]] = {
         "limit_adjusted": "✅ 接收方额度已更新。\n变化：{delta} 次扫描\n当前剩余额度：{remaining} / {total} 次扫描。",
         "limit_adjusted_offline": "✅ 接收方额度已更新。\n变化：{delta} 次扫描\n当前剩余额度为 0，因此您现在已下线。请使用 /on LIMIT 重新上线。",
         "limit_delta_zero": "额度变化不能为 0。请使用 /limit +5 或 /limit -5。",
+        "notify_receiver_limit_added": "🟢 接收方额度已增加。\n➕ 已增加额度：{change} 次扫描\n📊 当前总额度：{capacity} 次扫描。\n\n使用 /status 查看总实时容量。",
+        "notify_receiver_limit_reduced": "🟠 接收方额度已减少。\n➖ 已减少额度：{change} 次扫描\n📊 当前总额度：{capacity} 次扫描。\n\n使用 /status 查看总实时容量。",
     },
     "es": {
         "cmd_limit": "• /limit +5 o /limit -5 — añadir o reducir tu límite actual de escaneos como receptor",
@@ -970,12 +978,449 @@ _LIMIT_TRANSLATIONS: dict[str, dict[str, str]] = {
         "limit_adjusted": "✅ Límite de receptor actualizado.\nCambio: {delta} escaneos\nLímite restante actual: {remaining} / {total} escaneos.",
         "limit_adjusted_offline": "✅ Límite de receptor actualizado.\nCambio: {delta} escaneos\nEl límite restante actual es 0, así que ahora estás fuera de línea. Usa /on LIMIT para volver a estar en línea.",
         "limit_delta_zero": "El cambio de límite no puede ser 0. Usa /limit +5 o /limit -5.",
+        "notify_receiver_limit_added": "🟢 Límite de receptor añadido.\n➕ Límite añadido: {change} escaneos\n📊 Límite total ahora: {capacity} escaneos.\n\nUsa /status para ver la capacidad total en vivo.",
+        "notify_receiver_limit_reduced": "🟠 Límite de receptor reducido.\n➖ Límite reducido: {change} escaneos\n📊 Límite total ahora: {capacity} escaneos.\n\nUsa /status para ver la capacidad total en vivo.",
     },
 }
 for _code, _items in _LIMIT_TRANSLATIONS.items():
     _TRANSLATIONS.setdefault(_code, {}).update(_items)
 for _code in SUPPORTED_LANGUAGES:
     for _k, _v in _LIMIT_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
+
+_USER_TEXT_AUDIT_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "marketplace_status_title": "📡 Marketplace status",
+        "marketplace_online_receivers": "🟢 Online receivers: {count}",
+        "marketplace_capacity": "📊 Current scan capacity: {capacity}",
+        "marketplace_qr_expiry": "⏱ QR expiry: {minutes} minutes",
+        "marketplace_maintenance_on": "🚧 Maintenance mode is ON. New QR submissions are paused.",
+        "marketplace_your_available_balance": "💼 Your available balance: ${amount} USDT",
+        "marketplace_estimated_scans": "🧾 Estimated scans available: {scans}",
+        "marketplace_receiver_online_status": "Your receiver status: 🟢 online, {remaining} / {total} scans left.",
+        "marketplace_receiver_offline_status": "Your receiver status: 🔴 offline. Use /on LIMIT to go online.",
+        "wallet_history_title": "👛 Wallet History — Page {page}/{total_pages}",
+        "wallet_history_showing": "Showing wallet top-ups and admin balance updates, newest first.",
+        "wallet_history_empty": "No wallet history yet.",
+        "wallet_topup_id": "Wallet Top-up ID",
+        "payment_method_label": "Payment Method",
+        "amount_label": "Amount",
+        "related_id_label": "Related ID",
+        "btn_topup_again": "➕ Top-up Again",
+        "payment_status_completed": "✅ Completed",
+        "payment_status_expired": "❌ Expired",
+        "payment_status_rejected": "❌ Rejected",
+        "payment_status_review": "📝 Submitted for review",
+        "payment_status_pending": "⏳ Pending",
+        "wallet_label_admin_add": "Admin Wallet Add",
+        "wallet_label_admin_remove": "Admin Wallet Remove",
+        "wallet_method_admin_add": "Admin wallet add",
+        "wallet_method_admin_remove": "Admin wallet remove",
+        "topup_enter_amount": "💰 Enter the amount you want to top up in *$ (USDT)*.",
+        "topup_payment_method": "Payment method: *{method}*",
+        "topup_minimum": "_(Minimum: ${amount})_",
+        "press_back_abort": "Press Back to abort.",
+        "btn_check_payment": "🔄 Check Payment",
+        "btn_manual_verify": "✍️ Manual Verify",
+        "manual_verify_unlocked": "Manual Verify is unlocked now.",
+        "manual_verify_unlocks": "Manual Verify unlocks in about {minutes} minute(s).",
+        "wallet_topup_expired": "⏰ *Wallet Top-up Expired*\n\nWallet Top-up ID: `{ref_id}`\nThe payment was not completed within *{minutes} minutes*.\n\nPlease start a new wallet top-up.",
+        "wallet_topup_still_pending": "⌛ Wallet Top-up Still Pending\n\nWallet Top-up ID: `{ref_id}`\n\nYour payment is still pending. It will expire in about *{minutes} minutes* if payment is not completed.\n\nIf you already paid, use the payment buttons in the original message or contact support.",
+        "wallet_topup_completed": "✅ Wallet Top-up Completed!\n\n💰 ${amount} USDT added to your wallet.\n👛 Current USDT Balance: ${balance}\n\nUse /wallet to check your balance.",
+        "wallet_topup_rejected": "❌ Your payment could not be verified. Please contact support if you believe this is a mistake.",
+        "admin_wallet_added": "✅ Wallet balance added by admin.\nAdded: ${amount} USDT\nNew USDT balance: ${balance} USDT\nUse /wallet to check your balance.",
+        "admin_wallet_removed": "⚠️ Wallet balance adjusted by admin.\nRemoved: ${amount} USDT\nNew USDT balance: ${balance} USDT\nUse /wallet to check your balance.",
+        "payment_title_bep20": "🟡 *USDT (BEP20) Payment*",
+        "payment_title_polygon": "🟣 *USDT (POLYGON) Payment*",
+        "payment_title_binance": "🟡 *Binance Pay*",
+        "network_polygon": "🌐 Network: *Polygon PoS*",
+        "network_binance": "🌐 Network: *Binance Pay*",
+        "network_bep20": "🌐 Network: *BNB Smart Chain (BEP20)*",
+        "network_confirm_after": "✅ Payment will be confirmed after *{confirmations} network confirmations*.",
+        "payment_binance_details": "🆔 Binance Pay ID: `{pay_to}`\n👤 Name: {name}\n\n*Steps:*\n1️⃣ Open Binance app → Pay → Send\n2️⃣ Search Pay ID: `{pay_to}`\n3️⃣ Send exactly the unique USDT amount above\n\n⚠️ Do not round the amount. The unique decimals identify your wallet top-up automatically.\n🌐 Network: *Binance Pay*\n",
+        "payment_wallet_details": "To this wallet:\n`{pay_to}`\n\n⚠️ Send the exact amount shown above. The final USDT received must be exact; do not let exchange/network fees reduce this amount.\n{network_line}\n",
+        "payment_template": "{title}\n\n📋 Wallet Top-up ID `{ref_id}` | ${amount} USDT\n\nSend this amount:\n```\n{expected} USDT\n```\n{details}\n⏳ Time left: *{{TIME_LEFT}}*\n🔄 Bot checks automatically every {interval_seconds} seconds until this top-up is credited or expired.\n🧾 If you already paid and it is not verified, tap *Manual Verify* below.",
+        "payment_not_found": "Payment session not found.",
+        "payment_not_yours": "This payment session is not yours.",
+        "payment_screenshot_first": "Please send the screenshot proof first.",
+        "topup_already_completed": "✅ Wallet top-up already completed.",
+        "topup_processed_or_expired": "⚠️ This payment session is already processed or expired.",
+        "checking_binance_history": "Checking Binance Pay history...",
+        "checking_payment": "🔄 Checking payment...",
+        "manual_hash_prompt": "✍️ Please send your USDT transaction hash / TxID for this wallet top-up.",
+        "select_failure_buttons_only": "Please select one of the failure reason buttons.",
+        "send_screenshot_not_text": "📸 Please send a screenshot/photo proof, not text.",
+        "payment_session_gone": "Payment session not found anymore.",
+        "invalid_tx_hash": "❌ Please send a valid USDT transaction hash / TxID. It should look like `0x...` or a valid exchange transaction ID.",
+        "checking_tx_hash": "🔎 Checking transaction hash...",
+        "txhash_admin_review": "📸 Please send a screenshot proof of this USDT payment.\n\nYour TxHash needs admin review before this wallet top-up can be approved.",
+        "txhash_already_used": "❌ This transaction hash has already been used for a wallet top-up.\n\nPlease submit a different, unused USDT transaction hash.",
+        "txhash_incorrect": "❌ The transaction hash you submitted is incorrect.\n\nPlease send the correct USDT transaction hash / TxID for this wallet top-up.",
+        "screenshot_proof_next": "📸 Now send a screenshot proof of this USDT payment.\n\nIf the TxHash could not be auto-verified, support will review the proof.",
+        "enter_valid_number": "❌ Enter a valid number.",
+        "minimum_topup_amount": "❌ Minimum top-up amount is ${amount}.",
+        "send_screenshot_proof": "📸 Please send a screenshot/photo proof.",
+        "txhash_used_other": "❌ This transaction hash has already been used for another wallet top-up.",
+        "manual_verification_submitted": "⏳ Manual verification submitted for admin review.\nReference: {ref_id}",
+        "only_active_receivers_earnings": "Only active receivers can use /earnings.",
+        "only_active_receivers_payout": "Only active receivers can request payout.",
+        "withdraw_prompt": "💸 Withdraw\nAvailable: ${available} USDT\nMinimum: ${minimum} USDT\n\nSend quantity.",
+        "withdraw_no_available": "💸 Withdraw\nAvailable: ${available} USDT\nMinimum: ${minimum} USDT",
+        "send_payment_details": "💳 Send payment details.",
+        "payment_details_question": "💳 Payment details?\nQuantity: ${amount} USDT",
+        "btn_enter_new_payment_details": "✏️ Enter new payment details",
+        "payment_details_saved": "✅ Payment details saved.",
+        "send_valid_quantity": "Send a valid quantity.",
+        "minimum_payout": "Minimum payout is ${amount} USDT.",
+        "withdraw_available_due": "Available: ${available} USDT\nDue: ${due} USDT · Requested: ${requested} USDT",
+        "withdraw_submitted": "✅ Withdrawal request #{payout_id} submitted for ${amount} USDT.",
+        "payout_done": "✅ Payout done.\nAmount: ${amount} USDT\n\nYour earnings balance has been updated. Use /earnings to view it.",
+        "payout_rejected": "❌ Your payout request was rejected.\nAmount: ${amount} USDT\n\nThe amount is available again in /earnings.",
+        "dispute_open": "⚠️ *Open dispute*\n{qr_line}\n\nPlease send the reason for this dispute now.",
+        "dispute_cancelled": "Dispute cancelled.",
+        "dispute_reason_clear": "Please send a clear reason for the dispute.",
+        "dispute_submitted": "✅ Dispute #{ref_id} submitted. Admin will review it soon.",
+        "dispute_not_found": "Dispute not found.",
+        "dispute_not_yours": "This dispute is not yours.",
+        "dispute_closed": "This dispute is already closed.",
+        "dispute_reply_prompt": "💬 Reply to dispute #{ref}\n\nSend your message now.",
+        "dispute_reply_cancelled": "Dispute reply cancelled.",
+        "dispute_reply_clear": "Please send a clear reply.",
+        "dispute_reply_added": "✅ Reply added to dispute #{ref}.",
+        "dispute_reply_usage": "Use: /disputereply DISPUTE_ID your message",
+        "dispute_reply_send_now": "💬 Send your reply for dispute #{ref} now.",
+        "could_not_start_dispute": "Could not start that dispute.",
+        "qr_id_not_found": "I could not find that QR ID.",
+        "qr_not_linked_sender": "That QR ID is not linked to your sender account.",
+        "qr_not_linked_receiver": "That QR ID is not linked to your receiver account.",
+        "invalid_failure_reason": "Invalid failure reason.",
+        "invalid_offer_button": "Invalid offer button.",
+        "offer_claimed": "✅ You got this QR",
+        "claim_saved_delivery_failed": "Claim saved, but QR delivery failed. Ask admin to review.",
+        "invalid_notify_button": "Invalid notify button.",
+        "qr_not_found": "QR not found.",
+        "only_sender_notify_receiver": "Only the QR sender can notify the receiver.",
+        "qr_already_marked": "This QR is already marked {status}.",
+        "no_receiver_accepted": "No receiver has accepted this QR yet.",
+        "notify_receiver_failed": "Could not notify the receiver right now.",
+        "invalid_qr_button": "Invalid QR button.",
+        "only_receivers_open_pending": "Only active receivers can open pending QRs.",
+        "qr_not_found_for_account": "QR not found for your account.",
+        "qr_no_longer_pending": "This QR is no longer pending.",
+        "qr_open_failed": "Could not open that QR right now.",
+        "invalid_button": "Invalid button.",
+        "invalid_action": "Invalid action.",
+        "qr_not_found_generic": "I could not find that QR.",
+        "maintenance_on_alert": "Bot is under maintenance.",
+        "document_reject": "Please send the QR as a Telegram photo, not as a document. Photos are faster to process.",
+    },
+    "id": {
+        "marketplace_status_title": "📡 Status marketplace", "marketplace_online_receivers": "🟢 Penerima online: {count}", "marketplace_capacity": "📊 Kapasitas scan saat ini: {capacity}", "marketplace_qr_expiry": "⏱ Kedaluwarsa QR: {minutes} menit", "marketplace_maintenance_on": "🚧 Mode pemeliharaan AKTIF. Pengiriman QR baru dijeda.", "marketplace_your_available_balance": "💼 Saldo tersedia Anda: ${amount} USDT", "marketplace_estimated_scans": "🧾 Perkiraan scan tersedia: {scans}", "marketplace_receiver_online_status": "Status penerima Anda: 🟢 online, sisa {remaining} / {total} scan.", "marketplace_receiver_offline_status": "Status penerima Anda: 🔴 offline. Gunakan /on LIMIT untuk online.",
+        "wallet_history_title": "👛 Riwayat Wallet — Halaman {page}/{total_pages}", "wallet_history_showing": "Menampilkan top-up wallet dan pembaruan saldo oleh admin, terbaru lebih dulu.", "wallet_history_empty": "Belum ada riwayat wallet.", "wallet_topup_id": "ID Top-up Wallet", "payment_method_label": "Metode Pembayaran", "amount_label": "Jumlah", "related_id_label": "ID Terkait", "btn_topup_again": "➕ Top-up Lagi", "payment_status_completed": "✅ Selesai", "payment_status_expired": "❌ Kedaluwarsa", "payment_status_rejected": "❌ Ditolak", "payment_status_review": "📝 Dikirim untuk ditinjau", "payment_status_pending": "⏳ Tertunda", "wallet_label_admin_add": "Admin Menambah Wallet", "wallet_label_admin_remove": "Admin Mengurangi Wallet", "wallet_method_admin_add": "Penambahan wallet admin", "wallet_method_admin_remove": "Pengurangan wallet admin",
+        "topup_enter_amount": "💰 Masukkan jumlah yang ingin Anda top-up dalam *$ (USDT)*.", "topup_payment_method": "Metode pembayaran: *{method}*", "topup_minimum": "_(Minimum: ${amount})_", "press_back_abort": "Tekan Kembali untuk membatalkan.", "btn_check_payment": "🔄 Cek Pembayaran", "btn_manual_verify": "✍️ Verifikasi Manual", "manual_verify_unlocked": "Verifikasi Manual sudah terbuka sekarang.", "manual_verify_unlocks": "Verifikasi Manual terbuka sekitar {minutes} menit lagi.",
+        "wallet_topup_expired": "⏰ *Top-up Wallet Kedaluwarsa*\n\nID Top-up Wallet: `{ref_id}`\nPembayaran tidak selesai dalam *{minutes} menit*.\n\nSilakan mulai top-up wallet baru.", "wallet_topup_still_pending": "⌛ Top-up Wallet Masih Tertunda\n\nID Top-up Wallet: `{ref_id}`\n\nPembayaran Anda masih tertunda. Ini akan kedaluwarsa sekitar *{minutes} menit* jika pembayaran belum selesai.\n\nJika Anda sudah membayar, gunakan tombol pembayaran pada pesan asli atau hubungi dukungan.", "wallet_topup_completed": "✅ Top-up Wallet Selesai!\n\n💰 ${amount} USDT ditambahkan ke wallet Anda.\n👛 Saldo USDT Saat Ini: ${balance}\n\nGunakan /wallet untuk memeriksa saldo.", "wallet_topup_rejected": "❌ Pembayaran Anda tidak dapat diverifikasi. Hubungi dukungan jika menurut Anda ini kesalahan.", "admin_wallet_added": "✅ Saldo wallet ditambahkan oleh admin.\nDitambahkan: ${amount} USDT\nSaldo USDT baru: ${balance} USDT\nGunakan /wallet untuk memeriksa saldo.", "admin_wallet_removed": "⚠️ Saldo wallet disesuaikan oleh admin.\nDikurangi: ${amount} USDT\nSaldo USDT baru: ${balance} USDT\nGunakan /wallet untuk memeriksa saldo.",
+        "payment_title_bep20": "🟡 *Pembayaran USDT (BEP20)*", "payment_title_polygon": "🟣 *Pembayaran USDT (POLYGON)*", "payment_title_binance": "🟡 *Binance Pay*", "network_polygon": "🌐 Jaringan: *Polygon PoS*", "network_binance": "🌐 Jaringan: *Binance Pay*", "network_bep20": "🌐 Jaringan: *BNB Smart Chain (BEP20)*", "network_confirm_after": "✅ Pembayaran akan dikonfirmasi setelah *{confirmations} konfirmasi jaringan*.",
+        "payment_binance_details": "🆔 Binance Pay ID: `{pay_to}`\n👤 Nama: {name}\n\n*Langkah:*\n1️⃣ Buka aplikasi Binance → Pay → Send\n2️⃣ Cari Pay ID: `{pay_to}`\n3️⃣ Kirim jumlah USDT unik persis seperti di atas\n\n⚠️ Jangan membulatkan jumlah. Desimal unik tersebut mengidentifikasi top-up wallet Anda secara otomatis.\n🌐 Jaringan: *Binance Pay*\n", "payment_wallet_details": "Ke wallet ini:\n`{pay_to}`\n\n⚠️ Kirim jumlah persis seperti yang ditampilkan. USDT akhir yang diterima harus persis; jangan biarkan biaya exchange/jaringan mengurangi jumlah ini.\n{network_line}\n", "payment_template": "{title}\n\n📋 ID Top-up Wallet `{ref_id}` | ${amount} USDT\n\nKirim jumlah ini:\n```\n{expected} USDT\n```\n{details}\n⏳ Sisa waktu: *{{TIME_LEFT}}*\n🔄 Bot memeriksa otomatis setiap {interval_seconds} detik sampai top-up ini dikreditkan atau kedaluwarsa.\n🧾 Jika Anda sudah membayar dan belum terverifikasi, ketuk *Verifikasi Manual* di bawah.",
+        "payment_not_found": "Sesi pembayaran tidak ditemukan.", "payment_not_yours": "Sesi pembayaran ini bukan milik Anda.", "payment_screenshot_first": "Harap kirim bukti screenshot terlebih dahulu.", "topup_already_completed": "✅ Top-up wallet sudah selesai.", "topup_processed_or_expired": "⚠️ Sesi pembayaran ini sudah diproses atau kedaluwarsa.", "checking_binance_history": "Memeriksa riwayat Binance Pay...", "checking_payment": "🔄 Memeriksa pembayaran...", "manual_hash_prompt": "🔍 *Verifikasi USDT Manual*\n\nHarap kirim *hash transaksi USDT / TxID* terlebih dahulu.\nSetelah itu, Anda akan diminta mengirim bukti screenshot.", "select_failure_buttons_only": "Harap pilih salah satu tombol alasan kegagalan.", "send_screenshot_not_text": "📸 Harap kirim screenshot/foto bukti, bukan teks.", "payment_session_gone": "Sesi pembayaran tidak ditemukan lagi.", "invalid_tx_hash": "❌ Harap kirim hash transaksi USDT / TxID yang valid. Seharusnya terlihat seperti `0x...` atau ID transaksi exchange yang valid.", "checking_tx_hash": "🔎 Memeriksa hash transaksi...", "txhash_admin_review": "📸 Harap kirim bukti screenshot pembayaran USDT ini.\n\nTxHash Anda perlu ditinjau admin sebelum top-up wallet ini dapat disetujui.", "txhash_already_used": "❌ Hash transaksi ini sudah digunakan untuk top-up wallet.\n\nHarap kirim hash transaksi USDT lain yang belum digunakan.", "txhash_incorrect": "❌ Hash transaksi yang Anda kirim tidak benar.\n\nHarap kirim hash transaksi USDT / TxID yang benar untuk top-up wallet ini.", "screenshot_proof_next": "📸 Sekarang kirim bukti screenshot pembayaran USDT ini.\n\nJika TxHash tidak dapat diverifikasi otomatis, dukungan akan meninjau buktinya.", "enter_valid_number": "❌ Masukkan angka yang valid.", "minimum_topup_amount": "❌ Jumlah top-up minimum adalah ${amount}.", "send_screenshot_proof": "📸 Harap kirim screenshot/foto bukti.", "txhash_used_other": "❌ Hash transaksi ini sudah digunakan untuk top-up wallet lain.", "manual_verification_submitted": "⏳ Verifikasi manual dikirim untuk ditinjau admin.\nReferensi: {ref_id}",
+        "only_active_receivers_earnings": "Hanya penerima aktif yang dapat menggunakan /earnings.", "only_active_receivers_payout": "Hanya penerima aktif yang dapat meminta payout.", "withdraw_prompt": "💸 Withdraw\nTersedia: ${available} USDT\nMinimum: ${minimum} USDT\n\nKirim jumlah.", "withdraw_no_available": "💸 Withdraw\nTersedia: ${available} USDT\nMinimum: ${minimum} USDT", "send_payment_details": "💳 Kirim detail pembayaran.", "payment_details_question": "💳 Detail pembayaran?\nJumlah: ${amount} USDT", "btn_enter_new_payment_details": "✏️ Masukkan detail pembayaran baru", "payment_details_saved": "✅ Detail pembayaran disimpan.", "send_valid_quantity": "Kirim jumlah yang valid.", "minimum_payout": "Payout minimum adalah ${amount} USDT.", "withdraw_available_due": "Tersedia: ${available} USDT\nJatuh tempo: ${due} USDT · Diminta: ${requested} USDT", "withdraw_submitted": "✅ Permintaan withdraw #{payout_id} diajukan untuk ${amount} USDT.", "payout_done": "✅ Payout selesai.\nJumlah: ${amount} USDT\n\nSaldo earnings Anda telah diperbarui. Gunakan /earnings untuk melihatnya.", "payout_rejected": "❌ Permintaan payout Anda ditolak.\nJumlah: ${amount} USDT\n\nJumlah tersebut tersedia kembali di /earnings.",
+        "dispute_open": "⚠️ *Buka sengketa*\n{qr_line}\n\nHarap kirim alasan sengketa ini sekarang.", "dispute_cancelled": "Sengketa dibatalkan.", "dispute_reason_clear": "Harap kirim alasan sengketa yang jelas.", "dispute_submitted": "✅ Sengketa #{ref_id} dikirim. Admin akan segera meninjaunya.", "dispute_not_found": "Sengketa tidak ditemukan.", "dispute_not_yours": "Sengketa ini bukan milik Anda.", "dispute_closed": "Sengketa ini sudah ditutup.", "dispute_reply_prompt": "💬 Balas sengketa #{ref}\n\nKirim pesan Anda sekarang.", "dispute_reply_cancelled": "Balasan sengketa dibatalkan.", "dispute_reply_clear": "Harap kirim balasan yang jelas.", "dispute_reply_added": "✅ Balasan ditambahkan ke sengketa #{ref}.", "dispute_reply_usage": "Gunakan: /disputereply DISPUTE_ID pesan Anda", "dispute_reply_send_now": "💬 Kirim balasan Anda untuk sengketa #{ref} sekarang.", "could_not_start_dispute": "Tidak dapat memulai sengketa tersebut.", "qr_id_not_found": "Saya tidak dapat menemukan ID QR tersebut.", "qr_not_linked_sender": "ID QR tersebut tidak terhubung ke akun pengirim Anda.", "qr_not_linked_receiver": "ID QR tersebut tidak terhubung ke akun penerima Anda.",
+        "invalid_failure_reason": "Alasan kegagalan tidak valid.", "invalid_offer_button": "Tombol penawaran tidak valid.", "offer_claimed": "✅ Anda mendapatkan QR ini", "claim_saved_delivery_failed": "Claim disimpan, tetapi pengiriman QR gagal. Minta admin meninjau.", "invalid_notify_button": "Tombol notifikasi tidak valid.", "qr_not_found": "QR tidak ditemukan.", "only_sender_notify_receiver": "Hanya pengirim QR yang dapat memberi tahu penerima.", "qr_already_marked": "QR ini sudah ditandai {status}.", "no_receiver_accepted": "Belum ada penerima yang menerima QR ini.", "notify_receiver_failed": "Tidak dapat memberi tahu penerima saat ini.", "invalid_qr_button": "Tombol QR tidak valid.", "only_receivers_open_pending": "Hanya penerima aktif yang dapat membuka QR tertunda.", "qr_not_found_for_account": "QR tidak ditemukan untuk akun Anda.", "qr_no_longer_pending": "QR ini tidak lagi tertunda.", "qr_open_failed": "Tidak dapat membuka QR tersebut saat ini.", "invalid_button": "Tombol tidak valid.", "invalid_action": "Aksi tidak valid.", "qr_not_found_generic": "Saya tidak dapat menemukan QR tersebut.", "maintenance_on_alert": "Bot sedang dalam pemeliharaan.", "document_reject": "Harap kirim QR sebagai foto Telegram, bukan sebagai dokumen. Foto lebih cepat diproses.",
+    },
+    "vi": {
+        "marketplace_status_title": "📡 Trạng thái marketplace", "marketplace_online_receivers": "🟢 Người nhận online: {count}", "marketplace_capacity": "📊 Sức chứa quét hiện tại: {capacity}", "marketplace_qr_expiry": "⏱ QR hết hạn: {minutes} phút", "marketplace_maintenance_on": "🚧 Chế độ bảo trì đang BẬT. Tạm dừng gửi QR mới.", "marketplace_your_available_balance": "💼 Số dư khả dụng của bạn: ${amount} USDT", "marketplace_estimated_scans": "🧾 Số lượt quét ước tính còn dùng được: {scans}", "marketplace_receiver_online_status": "Trạng thái người nhận của bạn: 🟢 online, còn {remaining} / {total} lượt quét.", "marketplace_receiver_offline_status": "Trạng thái người nhận của bạn: 🔴 offline. Dùng /on LIMIT để online.",
+        "wallet_history_title": "👛 Lịch sử ví — Trang {page}/{total_pages}", "wallet_history_showing": "Hiển thị nạp ví và cập nhật số dư từ admin, mới nhất trước.", "wallet_history_empty": "Chưa có lịch sử ví.", "wallet_topup_id": "ID nạp ví", "payment_method_label": "Phương thức thanh toán", "amount_label": "Số tiền", "related_id_label": "ID liên quan", "btn_topup_again": "➕ Nạp lại", "payment_status_completed": "✅ Hoàn tất", "payment_status_expired": "❌ Hết hạn", "payment_status_rejected": "❌ Bị từ chối", "payment_status_review": "📝 Đã gửi để xét duyệt", "payment_status_pending": "⏳ Đang chờ", "wallet_label_admin_add": "Admin cộng ví", "wallet_label_admin_remove": "Admin trừ ví", "wallet_method_admin_add": "Admin cộng ví", "wallet_method_admin_remove": "Admin trừ ví",
+        "topup_enter_amount": "💰 Nhập số tiền bạn muốn nạp bằng *$ (USDT)*.", "topup_payment_method": "Phương thức thanh toán: *{method}*", "topup_minimum": "_(Tối thiểu: ${amount})_", "press_back_abort": "Nhấn Quay lại để hủy.", "btn_check_payment": "🔄 Kiểm tra thanh toán", "btn_manual_verify": "✍️ Xác minh thủ công", "manual_verify_unlocked": "Xác minh thủ công hiện đã mở.", "manual_verify_unlocks": "Xác minh thủ công sẽ mở sau khoảng {minutes} phút.",
+        "wallet_topup_expired": "⏰ *Nạp ví đã hết hạn*\n\nID nạp ví: `{ref_id}`\nThanh toán không hoàn tất trong *{minutes} phút*.\n\nVui lòng bắt đầu một lần nạp ví mới.", "wallet_topup_still_pending": "⌛ Nạp ví vẫn đang chờ\n\nID nạp ví: `{ref_id}`\n\nThanh toán của bạn vẫn đang chờ. Nó sẽ hết hạn sau khoảng *{minutes} phút* nếu chưa hoàn tất.\n\nNếu bạn đã thanh toán, hãy dùng các nút thanh toán trong tin nhắn gốc hoặc liên hệ hỗ trợ.", "wallet_topup_completed": "✅ Nạp ví hoàn tất!\n\n💰 ${amount} USDT đã được cộng vào ví của bạn.\n👛 Số dư USDT hiện tại: ${balance}\n\nDùng /wallet để kiểm tra số dư.", "wallet_topup_rejected": "❌ Không thể xác minh khoản thanh toán của bạn. Vui lòng liên hệ hỗ trợ nếu bạn cho rằng đây là lỗi.", "admin_wallet_added": "✅ Admin đã cộng số dư ví.\nĐã cộng: ${amount} USDT\nSố dư USDT mới: ${balance} USDT\nDùng /wallet để kiểm tra số dư.", "admin_wallet_removed": "⚠️ Admin đã điều chỉnh số dư ví.\nĐã trừ: ${amount} USDT\nSố dư USDT mới: ${balance} USDT\nDùng /wallet để kiểm tra số dư.",
+        "payment_title_bep20": "🟡 *Thanh toán USDT (BEP20)*", "payment_title_polygon": "🟣 *Thanh toán USDT (POLYGON)*", "payment_title_binance": "🟡 *Binance Pay*", "network_polygon": "🌐 Mạng: *Polygon PoS*", "network_binance": "🌐 Mạng: *Binance Pay*", "network_bep20": "🌐 Mạng: *BNB Smart Chain (BEP20)*", "network_confirm_after": "✅ Thanh toán sẽ được xác nhận sau *{confirmations} xác nhận mạng*.",
+        "payment_binance_details": "🆔 Binance Pay ID: `{pay_to}`\n👤 Tên: {name}\n\n*Các bước:*\n1️⃣ Mở ứng dụng Binance → Pay → Send\n2️⃣ Tìm Pay ID: `{pay_to}`\n3️⃣ Gửi đúng số USDT duy nhất ở trên\n\n⚠️ Không làm tròn số tiền. Các chữ số thập phân duy nhất sẽ tự động nhận diện lần nạp ví của bạn.\n🌐 Mạng: *Binance Pay*\n", "payment_wallet_details": "Đến ví này:\n`{pay_to}`\n\n⚠️ Gửi đúng số tiền hiển thị ở trên. Số USDT cuối cùng nhận được phải chính xác; đừng để phí sàn/mạng làm giảm số tiền này.\n{network_line}\n", "payment_template": "{title}\n\n📋 ID nạp ví `{ref_id}` | ${amount} USDT\n\nGửi số tiền này:\n```\n{expected} USDT\n```\n{details}\n⏳ Thời gian còn lại: *{{TIME_LEFT}}*\n🔄 Bot tự động kiểm tra mỗi {interval_seconds} giây cho đến khi khoản nạp được ghi có hoặc hết hạn.\n🧾 Nếu bạn đã thanh toán nhưng chưa được xác minh, hãy nhấn *Xác minh thủ công* bên dưới.",
+        "payment_not_found": "Không tìm thấy phiên thanh toán.", "payment_not_yours": "Phiên thanh toán này không phải của bạn.", "payment_screenshot_first": "Vui lòng gửi ảnh chụp bằng chứng trước.", "topup_already_completed": "✅ Nạp ví đã hoàn tất.", "topup_processed_or_expired": "⚠️ Phiên thanh toán này đã được xử lý hoặc đã hết hạn.", "checking_binance_history": "Đang kiểm tra lịch sử Binance Pay...", "checking_payment": "🔄 Đang kiểm tra thanh toán...", "manual_hash_prompt": "🔍 *Xác minh USDT thủ công*\n\nVui lòng gửi *hash giao dịch USDT / TxID* trước.\nSau đó bạn sẽ được yêu cầu gửi ảnh chụp bằng chứng.", "select_failure_buttons_only": "Vui lòng chọn một trong các nút lý do thất bại.", "send_screenshot_not_text": "📸 Vui lòng gửi ảnh chụp/ảnh bằng chứng, không gửi văn bản.", "payment_session_gone": "Phiên thanh toán không còn tồn tại.", "invalid_tx_hash": "❌ Vui lòng gửi hash giao dịch USDT / TxID hợp lệ. Nó nên có dạng `0x...` hoặc ID giao dịch sàn hợp lệ.", "checking_tx_hash": "🔎 Đang kiểm tra hash giao dịch...", "txhash_admin_review": "📸 Vui lòng gửi ảnh chụp bằng chứng thanh toán USDT này.\n\nTxHash của bạn cần admin xét duyệt trước khi lần nạp ví này được phê duyệt.", "txhash_already_used": "❌ Hash giao dịch này đã được dùng cho một lần nạp ví.\n\nVui lòng gửi một hash giao dịch USDT khác chưa được dùng.", "txhash_incorrect": "❌ Hash giao dịch bạn gửi không đúng.\n\nVui lòng gửi đúng hash giao dịch USDT / TxID cho lần nạp ví này.", "screenshot_proof_next": "📸 Bây giờ hãy gửi ảnh chụp bằng chứng thanh toán USDT này.\n\nNếu TxHash không thể xác minh tự động, bộ phận hỗ trợ sẽ xem xét bằng chứng.", "enter_valid_number": "❌ Nhập một số hợp lệ.", "minimum_topup_amount": "❌ Số tiền nạp tối thiểu là ${amount}.", "send_screenshot_proof": "📸 Vui lòng gửi ảnh chụp/ảnh bằng chứng.", "txhash_used_other": "❌ Hash giao dịch này đã được dùng cho một lần nạp ví khác.", "manual_verification_submitted": "⏳ Xác minh thủ công đã được gửi để admin xét duyệt.\nTham chiếu: {ref_id}",
+        "only_active_receivers_earnings": "Chỉ người nhận đang hoạt động mới có thể dùng /earnings.", "only_active_receivers_payout": "Chỉ người nhận đang hoạt động mới có thể yêu cầu thanh toán.", "withdraw_prompt": "💸 Rút tiền\nKhả dụng: ${available} USDT\nTối thiểu: ${minimum} USDT\n\nGửi số lượng.", "withdraw_no_available": "💸 Rút tiền\nKhả dụng: ${available} USDT\nTối thiểu: ${minimum} USDT", "send_payment_details": "💳 Gửi chi tiết thanh toán.", "payment_details_question": "💳 Chi tiết thanh toán?\nSố lượng: ${amount} USDT", "btn_enter_new_payment_details": "✏️ Nhập chi tiết thanh toán mới", "payment_details_saved": "✅ Đã lưu chi tiết thanh toán.", "send_valid_quantity": "Gửi số lượng hợp lệ.", "minimum_payout": "Thanh toán tối thiểu là ${amount} USDT.", "withdraw_available_due": "Khả dụng: ${available} USDT\nĐến hạn: ${due} USDT · Đã yêu cầu: ${requested} USDT", "withdraw_submitted": "✅ Yêu cầu rút tiền #{payout_id} đã được gửi với ${amount} USDT.", "payout_done": "✅ Đã thanh toán.\nSố tiền: ${amount} USDT\n\nSố dư thu nhập của bạn đã được cập nhật. Dùng /earnings để xem.", "payout_rejected": "❌ Yêu cầu thanh toán của bạn đã bị từ chối.\nSố tiền: ${amount} USDT\n\nSố tiền này hiện lại khả dụng trong /earnings.",
+        "dispute_open": "⚠️ *Mở tranh chấp*\n{qr_line}\n\nVui lòng gửi lý do tranh chấp này ngay bây giờ.", "dispute_cancelled": "Đã hủy tranh chấp.", "dispute_reason_clear": "Vui lòng gửi lý do tranh chấp rõ ràng.", "dispute_submitted": "✅ Tranh chấp #{ref_id} đã được gửi. Admin sẽ sớm xem xét.", "dispute_not_found": "Không tìm thấy tranh chấp.", "dispute_not_yours": "Tranh chấp này không phải của bạn.", "dispute_closed": "Tranh chấp này đã đóng.", "dispute_reply_prompt": "💬 Trả lời tranh chấp #{ref}\n\nGửi tin nhắn của bạn ngay bây giờ.", "dispute_reply_cancelled": "Đã hủy trả lời tranh chấp.", "dispute_reply_clear": "Vui lòng gửi câu trả lời rõ ràng.", "dispute_reply_added": "✅ Đã thêm trả lời vào tranh chấp #{ref}.", "dispute_reply_usage": "Dùng: /disputereply DISPUTE_ID tin nhắn của bạn", "dispute_reply_send_now": "💬 Gửi trả lời của bạn cho tranh chấp #{ref} ngay bây giờ.", "could_not_start_dispute": "Không thể bắt đầu tranh chấp đó.", "qr_id_not_found": "Tôi không tìm thấy ID QR đó.", "qr_not_linked_sender": "ID QR đó không liên kết với tài khoản người gửi của bạn.", "qr_not_linked_receiver": "ID QR đó không liên kết với tài khoản người nhận của bạn.",
+        "invalid_failure_reason": "Lý do thất bại không hợp lệ.", "invalid_offer_button": "Nút ưu đãi không hợp lệ.", "offer_claimed": "✅ Bạn đã nhận QR này", "claim_saved_delivery_failed": "Đã lưu nhận QR, nhưng gửi QR thất bại. Hãy yêu cầu admin kiểm tra.", "invalid_notify_button": "Nút thông báo không hợp lệ.", "qr_not_found": "Không tìm thấy QR.", "only_sender_notify_receiver": "Chỉ người gửi QR mới có thể nhắc người nhận.", "qr_already_marked": "QR này đã được đánh dấu {status}.", "no_receiver_accepted": "Chưa có người nhận nào chấp nhận QR này.", "notify_receiver_failed": "Hiện không thể nhắc người nhận.", "invalid_qr_button": "Nút QR không hợp lệ.", "only_receivers_open_pending": "Chỉ người nhận đang hoạt động mới có thể mở QR đang chờ.", "qr_not_found_for_account": "Không tìm thấy QR cho tài khoản của bạn.", "qr_no_longer_pending": "QR này không còn đang chờ.", "qr_open_failed": "Hiện không thể mở QR đó.", "invalid_button": "Nút không hợp lệ.", "invalid_action": "Hành động không hợp lệ.", "qr_not_found_generic": "Tôi không tìm thấy QR đó.", "maintenance_on_alert": "Bot đang bảo trì.", "document_reject": "Vui lòng gửi QR dưới dạng ảnh Telegram, không phải tài liệu. Ảnh được xử lý nhanh hơn.",
+    },
+    "zh": {
+        "marketplace_status_title": "📡 市场状态", "marketplace_online_receivers": "🟢 在线接收方：{count}", "marketplace_capacity": "📊 当前扫描容量：{capacity}", "marketplace_qr_expiry": "⏱ QR 过期时间：{minutes} 分钟", "marketplace_maintenance_on": "🚧 维护模式已开启。新的 QR 提交已暂停。", "marketplace_your_available_balance": "💼 您的可用余额：${amount} USDT", "marketplace_estimated_scans": "🧾 预计可用扫描次数：{scans}", "marketplace_receiver_online_status": "您的接收方状态：🟢 在线，剩余 {remaining} / {total} 次扫描。", "marketplace_receiver_offline_status": "您的接收方状态：🔴 离线。使用 /on LIMIT 上线。",
+        "wallet_history_title": "👛 钱包历史 — 第 {page}/{total_pages} 页", "wallet_history_showing": "显示钱包充值和管理员余额更新，最新在前。", "wallet_history_empty": "暂无钱包历史。", "wallet_topup_id": "钱包充值 ID", "payment_method_label": "付款方式", "amount_label": "金额", "related_id_label": "关联 ID", "btn_topup_again": "➕ 再次充值", "payment_status_completed": "✅ 已完成", "payment_status_expired": "❌ 已过期", "payment_status_rejected": "❌ 已拒绝", "payment_status_review": "📝 已提交审核", "payment_status_pending": "⏳ 待处理", "wallet_label_admin_add": "管理员增加钱包余额", "wallet_label_admin_remove": "管理员扣减钱包余额", "wallet_method_admin_add": "管理员增加钱包", "wallet_method_admin_remove": "管理员扣减钱包",
+        "topup_enter_amount": "💰 请输入您要充值的金额，单位为 *$ (USDT)*。", "topup_payment_method": "付款方式：*{method}*", "topup_minimum": "_(最低：${amount})_", "press_back_abort": "按返回可取消。", "btn_check_payment": "🔄 检查付款", "btn_manual_verify": "✍️ 手动验证", "manual_verify_unlocked": "现在可以进行手动验证。", "manual_verify_unlocks": "手动验证约 {minutes} 分钟后解锁。",
+        "wallet_topup_expired": "⏰ *钱包充值已过期*\n\n钱包充值 ID：`{ref_id}`\n付款未在 *{minutes} 分钟* 内完成。\n\n请重新开始钱包充值。", "wallet_topup_still_pending": "⌛ 钱包充值仍在等待\n\n钱包充值 ID：`{ref_id}`\n\n您的付款仍在等待中。如果未完成付款，大约 *{minutes} 分钟* 后会过期。\n\n如果您已经付款，请使用原消息中的付款按钮，或联系支持。", "wallet_topup_completed": "✅ 钱包充值完成！\n\n💰 ${amount} USDT 已添加到您的钱包。\n👛 当前 USDT 余额：${balance}\n\n使用 /wallet 查看余额。", "wallet_topup_rejected": "❌ 无法验证您的付款。如果您认为这是错误，请联系支持。", "admin_wallet_added": "✅ 管理员已添加钱包余额。\n添加：${amount} USDT\n新的 USDT 余额：${balance} USDT\n使用 /wallet 查看余额。", "admin_wallet_removed": "⚠️ 管理员已调整钱包余额。\n扣除：${amount} USDT\n新的 USDT 余额：${balance} USDT\n使用 /wallet 查看余额。",
+        "payment_title_bep20": "🟡 *USDT (BEP20) 付款*", "payment_title_polygon": "🟣 *USDT (POLYGON) 付款*", "payment_title_binance": "🟡 *Binance Pay*", "network_polygon": "🌐 网络：*Polygon PoS*", "network_binance": "🌐 网络：*Binance Pay*", "network_bep20": "🌐 网络：*BNB Smart Chain (BEP20)*", "network_confirm_after": "✅ 付款将在 *{confirmations} 次网络确认* 后确认。",
+        "payment_binance_details": "🆔 Binance Pay ID：`{pay_to}`\n👤 名称：{name}\n\n*步骤：*\n1️⃣ 打开 Binance 应用 → Pay → Send\n2️⃣ 搜索 Pay ID：`{pay_to}`\n3️⃣ 准确发送上方唯一的 USDT 金额\n\n⚠️ 不要四舍五入金额。唯一的小数会自动识别您的钱包充值。\n🌐 网络：*Binance Pay*\n", "payment_wallet_details": "发送到此钱包：\n`{pay_to}`\n\n⚠️ 请发送上方显示的准确金额。最终收到的 USDT 必须完全一致；不要让交易所/网络手续费减少该金额。\n{network_line}\n", "payment_template": "{title}\n\n📋 钱包充值 ID `{ref_id}` | ${amount} USDT\n\n发送此金额：\n```\n{expected} USDT\n```\n{details}\n⏳ 剩余时间：*{{TIME_LEFT}}*\n🔄 Bot 每 {interval_seconds} 秒自动检查一次，直到此充值到账或过期。\n🧾 如果您已经付款但未验证，请点击下方的 *手动验证*。",
+        "payment_not_found": "未找到付款会话。", "payment_not_yours": "此付款会话不属于您。", "payment_screenshot_first": "请先发送截图证明。", "topup_already_completed": "✅ 钱包充值已完成。", "topup_processed_or_expired": "⚠️ 此付款会话已处理或已过期。", "checking_binance_history": "正在检查 Binance Pay 历史...", "checking_payment": "🔄 正在检查付款...", "manual_hash_prompt": "🔍 *手动 USDT 验证*\n\n请先发送您的 *USDT 交易哈希 / TxID*。\n之后会要求您发送截图证明。", "select_failure_buttons_only": "请从失败原因按钮中选择一个。", "send_screenshot_not_text": "📸 请发送截图/照片证明，不要发送文字。", "payment_session_gone": "付款会话已不存在。", "invalid_tx_hash": "❌ 请发送有效的 USDT 交易哈希 / TxID。格式应类似 `0x...` 或有效的交易所交易 ID。", "checking_tx_hash": "🔎 正在检查交易哈希...", "txhash_admin_review": "📸 请发送此 USDT 付款的截图证明。\n\n您的 TxHash 需要管理员审核后才能批准此钱包充值。", "txhash_already_used": "❌ 此交易哈希已用于钱包充值。\n\n请提交另一个未使用的 USDT 交易哈希。", "txhash_incorrect": "❌ 您提交的交易哈希不正确。\n\n请发送此钱包充值的正确 USDT 交易哈希 / TxID。", "screenshot_proof_next": "📸 现在请发送此 USDT 付款的截图证明。\n\n如果 TxHash 无法自动验证，支持人员会审核证明。", "enter_valid_number": "❌ 请输入有效数字。", "minimum_topup_amount": "❌ 最低充值金额为 ${amount}。", "send_screenshot_proof": "📸 请发送截图/照片证明。", "txhash_used_other": "❌ 此交易哈希已用于另一次钱包充值。", "manual_verification_submitted": "⏳ 手动验证已提交给管理员审核。\n参考：{ref_id}",
+        "only_active_receivers_earnings": "只有活跃接收方可以使用 /earnings。", "only_active_receivers_payout": "只有活跃接收方可以申请付款。", "withdraw_prompt": "💸 提现\n可用：${available} USDT\n最低：${minimum} USDT\n\n发送数量。", "withdraw_no_available": "💸 提现\n可用：${available} USDT\n最低：${minimum} USDT", "send_payment_details": "💳 发送付款详情。", "payment_details_question": "💳 付款详情？\n数量：${amount} USDT", "btn_enter_new_payment_details": "✏️ 输入新的付款详情", "payment_details_saved": "✅ 付款详情已保存。", "send_valid_quantity": "请发送有效数量。", "minimum_payout": "最低付款金额为 ${amount} USDT。", "withdraw_available_due": "可用：${available} USDT\n应付：${due} USDT · 已申请：${requested} USDT", "withdraw_submitted": "✅ 提现申请 #{payout_id} 已提交，金额 ${amount} USDT。", "payout_done": "✅ 付款已完成。\n金额：${amount} USDT\n\n您的收益余额已更新。使用 /earnings 查看。", "payout_rejected": "❌ 您的付款申请已被拒绝。\n金额：${amount} USDT\n\n该金额已重新在 /earnings 中可用。",
+        "dispute_open": "⚠️ *开启争议*\n{qr_line}\n\n请现在发送此争议的原因。", "dispute_cancelled": "争议已取消。", "dispute_reason_clear": "请发送明确的争议原因。", "dispute_submitted": "✅ 争议 #{ref_id} 已提交。管理员会尽快审核。", "dispute_not_found": "未找到争议。", "dispute_not_yours": "此争议不属于您。", "dispute_closed": "此争议已关闭。", "dispute_reply_prompt": "💬 回复争议 #{ref}\n\n请现在发送您的消息。", "dispute_reply_cancelled": "争议回复已取消。", "dispute_reply_clear": "请发送明确的回复。", "dispute_reply_added": "✅ 回复已添加到争议 #{ref}。", "dispute_reply_usage": "用法：/disputereply DISPUTE_ID 您的消息", "dispute_reply_send_now": "💬 请现在发送您对争议 #{ref} 的回复。", "could_not_start_dispute": "无法开启该争议。", "qr_id_not_found": "我找不到该 QR ID。", "qr_not_linked_sender": "该 QR ID 未关联到您的发送方账户。", "qr_not_linked_receiver": "该 QR ID 未关联到您的接收方账户。",
+        "invalid_failure_reason": "失败原因无效。", "invalid_offer_button": "报价按钮无效。", "offer_claimed": "✅ 您已获得此 QR", "claim_saved_delivery_failed": "领取已保存，但 QR 发送失败。请让管理员检查。", "invalid_notify_button": "通知按钮无效。", "qr_not_found": "未找到 QR。", "only_sender_notify_receiver": "只有 QR 发送方可以提醒接收方。", "qr_already_marked": "此 QR 已标记为 {status}。", "no_receiver_accepted": "尚无接收方接受此 QR。", "notify_receiver_failed": "现在无法提醒接收方。", "invalid_qr_button": "QR 按钮无效。", "only_receivers_open_pending": "只有活跃接收方可以打开待处理 QR。", "qr_not_found_for_account": "未找到属于您账户的 QR。", "qr_no_longer_pending": "此 QR 不再处于待处理状态。", "qr_open_failed": "现在无法打开该 QR。", "invalid_button": "按钮无效。", "invalid_action": "操作无效。", "qr_not_found_generic": "我找不到该 QR。", "maintenance_on_alert": "Bot 正在维护。", "document_reject": "请将 QR 作为 Telegram 照片发送，不要作为文件发送。照片处理更快。",
+    },
+    "es": {
+        "marketplace_status_title": "📡 Estado del marketplace", "marketplace_online_receivers": "🟢 Receptores en línea: {count}", "marketplace_capacity": "📊 Capacidad actual de escaneos: {capacity}", "marketplace_qr_expiry": "⏱ Vencimiento del QR: {minutes} minutos", "marketplace_maintenance_on": "🚧 El modo de mantenimiento está ACTIVADO. Los nuevos envíos de QR están pausados.", "marketplace_your_available_balance": "💼 Tu saldo disponible: ${amount} USDT", "marketplace_estimated_scans": "🧾 Escaneos estimados disponibles: {scans}", "marketplace_receiver_online_status": "Tu estado como receptor: 🟢 en línea, quedan {remaining} / {total} escaneos.", "marketplace_receiver_offline_status": "Tu estado como receptor: 🔴 fuera de línea. Usa /on LIMIT para estar en línea.",
+        "wallet_history_title": "👛 Historial de billetera — Página {page}/{total_pages}", "wallet_history_showing": "Mostrando recargas de billetera y actualizaciones de saldo del admin, primero las más recientes.", "wallet_history_empty": "Aún no hay historial de billetera.", "wallet_topup_id": "ID de recarga de billetera", "payment_method_label": "Método de pago", "amount_label": "Cantidad", "related_id_label": "ID relacionado", "btn_topup_again": "➕ Recargar otra vez", "payment_status_completed": "✅ Completado", "payment_status_expired": "❌ Vencido", "payment_status_rejected": "❌ Rechazado", "payment_status_review": "📝 Enviado a revisión", "payment_status_pending": "⏳ Pendiente", "wallet_label_admin_add": "Admin agregó saldo", "wallet_label_admin_remove": "Admin quitó saldo", "wallet_method_admin_add": "Saldo agregado por admin", "wallet_method_admin_remove": "Saldo quitado por admin",
+        "topup_enter_amount": "💰 Ingresa la cantidad que quieres recargar en *$ (USDT)*.", "topup_payment_method": "Método de pago: *{method}*", "topup_minimum": "_(Mínimo: ${amount})_", "press_back_abort": "Pulsa Volver para cancelar.", "btn_check_payment": "🔄 Verificar pago", "btn_manual_verify": "✍️ Verificación manual", "manual_verify_unlocked": "La verificación manual ya está disponible.", "manual_verify_unlocks": "La verificación manual se desbloquea en aproximadamente {minutes} minuto(s).",
+        "wallet_topup_expired": "⏰ *Recarga de billetera vencida*\n\nID de recarga de billetera: `{ref_id}`\nEl pago no se completó en *{minutes} minutos*.\n\nInicia una nueva recarga de billetera.", "wallet_topup_still_pending": "⌛ La recarga de billetera sigue pendiente\n\nID de recarga de billetera: `{ref_id}`\n\nTu pago sigue pendiente. Vencerá en aproximadamente *{minutes} minutos* si no se completa.\n\nSi ya pagaste, usa los botones de pago en el mensaje original o contacta con soporte.", "wallet_topup_completed": "✅ ¡Recarga de billetera completada!\n\n💰 ${amount} USDT agregado a tu billetera.\n👛 Saldo USDT actual: ${balance}\n\nUsa /wallet para revisar tu saldo.", "wallet_topup_rejected": "❌ No se pudo verificar tu pago. Contacta con soporte si crees que es un error.", "admin_wallet_added": "✅ Saldo de billetera agregado por admin.\nAgregado: ${amount} USDT\nNuevo saldo USDT: ${balance} USDT\nUsa /wallet para revisar tu saldo.", "admin_wallet_removed": "⚠️ Saldo de billetera ajustado por admin.\nQuitado: ${amount} USDT\nNuevo saldo USDT: ${balance} USDT\nUsa /wallet para revisar tu saldo.",
+        "payment_title_bep20": "🟡 *Pago USDT (BEP20)*", "payment_title_polygon": "🟣 *Pago USDT (POLYGON)*", "payment_title_binance": "🟡 *Binance Pay*", "network_polygon": "🌐 Red: *Polygon PoS*", "network_binance": "🌐 Red: *Binance Pay*", "network_bep20": "🌐 Red: *BNB Smart Chain (BEP20)*", "network_confirm_after": "✅ El pago se confirmará después de *{confirmations} confirmaciones de red*.",
+        "payment_binance_details": "🆔 Binance Pay ID: `{pay_to}`\n👤 Nombre: {name}\n\n*Pasos:*\n1️⃣ Abre la app de Binance → Pay → Send\n2️⃣ Busca Pay ID: `{pay_to}`\n3️⃣ Envía exactamente la cantidad única de USDT indicada arriba\n\n⚠️ No redondees la cantidad. Los decimales únicos identifican automáticamente tu recarga de billetera.\n🌐 Red: *Binance Pay*\n", "payment_wallet_details": "A esta billetera:\n`{pay_to}`\n\n⚠️ Envía exactamente la cantidad mostrada arriba. El USDT final recibido debe ser exacto; no permitas que las comisiones de exchange/red reduzcan esta cantidad.\n{network_line}\n", "payment_template": "{title}\n\n📋 ID de recarga de billetera `{ref_id}` | ${amount} USDT\n\nEnvía esta cantidad:\n```\n{expected} USDT\n```\n{details}\n⏳ Tiempo restante: *{{TIME_LEFT}}*\n🔄 El bot verifica automáticamente cada {interval_seconds} segundos hasta que esta recarga se acredite o venza.\n🧾 Si ya pagaste y no se verifica, toca *Verificación manual* abajo.",
+        "payment_not_found": "Sesión de pago no encontrada.", "payment_not_yours": "Esta sesión de pago no es tuya.", "payment_screenshot_first": "Envía primero la captura de pantalla como prueba.", "topup_already_completed": "✅ La recarga de billetera ya está completada.", "topup_processed_or_expired": "⚠️ Esta sesión de pago ya fue procesada o venció.", "checking_binance_history": "Revisando historial de Binance Pay...", "checking_payment": "🔄 Verificando pago...", "manual_hash_prompt": "🔍 *Verificación manual de USDT*\n\nEnvía primero tu *hash de transacción USDT / TxID*.\nDespués se te pedirá una captura de pantalla como prueba.", "select_failure_buttons_only": "Selecciona uno de los botones de motivo de fallo.", "send_screenshot_not_text": "📸 Envía una captura/foto de prueba, no texto.", "payment_session_gone": "La sesión de pago ya no existe.", "invalid_tx_hash": "❌ Envía un hash de transacción USDT / TxID válido. Debe parecerse a `0x...` o a un ID de transacción de exchange válido.", "checking_tx_hash": "🔎 Revisando hash de transacción...", "txhash_admin_review": "📸 Envía una captura de pantalla como prueba de este pago USDT.\n\nTu TxHash necesita revisión del admin antes de aprobar esta recarga.", "txhash_already_used": "❌ Este hash de transacción ya se usó para una recarga de billetera.\n\nEnvía un hash de transacción USDT diferente y sin usar.", "txhash_incorrect": "❌ El hash de transacción enviado es incorrecto.\n\nEnvía el hash de transacción USDT / TxID correcto para esta recarga.", "screenshot_proof_next": "📸 Ahora envía una captura de pantalla como prueba de este pago USDT.\n\nSi el TxHash no se pudo verificar automáticamente, soporte revisará la prueba.", "enter_valid_number": "❌ Ingresa un número válido.", "minimum_topup_amount": "❌ La recarga mínima es ${amount}.", "send_screenshot_proof": "📸 Envía una captura/foto de prueba.", "txhash_used_other": "❌ Este hash de transacción ya fue usado para otra recarga de billetera.", "manual_verification_submitted": "⏳ Verificación manual enviada para revisión del admin.\nReferencia: {ref_id}",
+        "only_active_receivers_earnings": "Solo los receptores activos pueden usar /earnings.", "only_active_receivers_payout": "Solo los receptores activos pueden solicitar payout.", "withdraw_prompt": "💸 Retirar\nDisponible: ${available} USDT\nMínimo: ${minimum} USDT\n\nEnvía la cantidad.", "withdraw_no_available": "💸 Retirar\nDisponible: ${available} USDT\nMínimo: ${minimum} USDT", "send_payment_details": "💳 Envía los detalles de pago.", "payment_details_question": "💳 ¿Detalles de pago?\nCantidad: ${amount} USDT", "btn_enter_new_payment_details": "✏️ Ingresar nuevos detalles de pago", "payment_details_saved": "✅ Detalles de pago guardados.", "send_valid_quantity": "Envía una cantidad válida.", "minimum_payout": "El payout mínimo es ${amount} USDT.", "withdraw_available_due": "Disponible: ${available} USDT\nPendiente: ${due} USDT · Solicitado: ${requested} USDT", "withdraw_submitted": "✅ Solicitud de retiro #{payout_id} enviada por ${amount} USDT.", "payout_done": "✅ Payout realizado.\nCantidad: ${amount} USDT\n\nTu saldo de ganancias se ha actualizado. Usa /earnings para verlo.", "payout_rejected": "❌ Tu solicitud de payout fue rechazada.\nCantidad: ${amount} USDT\n\nLa cantidad vuelve a estar disponible en /earnings.",
+        "dispute_open": "⚠️ *Abrir disputa*\n{qr_line}\n\nEnvía ahora el motivo de esta disputa.", "dispute_cancelled": "Disputa cancelada.", "dispute_reason_clear": "Envía un motivo claro para la disputa.", "dispute_submitted": "✅ Disputa #{ref_id} enviada. El admin la revisará pronto.", "dispute_not_found": "Disputa no encontrada.", "dispute_not_yours": "Esta disputa no es tuya.", "dispute_closed": "Esta disputa ya está cerrada.", "dispute_reply_prompt": "💬 Responder a disputa #{ref}\n\nEnvía tu mensaje ahora.", "dispute_reply_cancelled": "Respuesta de disputa cancelada.", "dispute_reply_clear": "Envía una respuesta clara.", "dispute_reply_added": "✅ Respuesta agregada a la disputa #{ref}.", "dispute_reply_usage": "Uso: /disputereply DISPUTE_ID tu mensaje", "dispute_reply_send_now": "💬 Envía ahora tu respuesta para la disputa #{ref}.", "could_not_start_dispute": "No se pudo iniciar esa disputa.", "qr_id_not_found": "No pude encontrar ese ID de QR.", "qr_not_linked_sender": "Ese ID de QR no está vinculado a tu cuenta de remitente.", "qr_not_linked_receiver": "Ese ID de QR no está vinculado a tu cuenta de receptor.",
+        "invalid_failure_reason": "Motivo de fallo inválido.", "invalid_offer_button": "Botón de oferta inválido.", "offer_claimed": "✅ Obtuviste este QR", "claim_saved_delivery_failed": "Asignación guardada, pero falló el envío del QR. Pide al admin que lo revise.", "invalid_notify_button": "Botón de notificación inválido.", "qr_not_found": "QR no encontrado.", "only_sender_notify_receiver": "Solo el remitente del QR puede notificar al receptor.", "qr_already_marked": "Este QR ya está marcado como {status}.", "no_receiver_accepted": "Ningún receptor ha aceptado este QR todavía.", "notify_receiver_failed": "No se pudo notificar al receptor ahora mismo.", "invalid_qr_button": "Botón de QR inválido.", "only_receivers_open_pending": "Solo los receptores activos pueden abrir QRs pendientes.", "qr_not_found_for_account": "QR no encontrado para tu cuenta.", "qr_no_longer_pending": "Este QR ya no está pendiente.", "qr_open_failed": "No se pudo abrir ese QR ahora mismo.", "invalid_button": "Botón inválido.", "invalid_action": "Acción inválida.", "qr_not_found_generic": "No pude encontrar ese QR.", "maintenance_on_alert": "El bot está en mantenimiento.", "document_reject": "Envía el QR como foto de Telegram, no como documento. Las fotos se procesan más rápido.",
+    },
+}
+for _code, _items in _USER_TEXT_AUDIT_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _USER_TEXT_AUDIT_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
+_STATUS_FLOW_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "payment_check_running": "Payment check is still running.\n{unlock_text}",
+        "txid_hint": "_(TxID usually starts with 0x... — find it in your wallet's transaction history)_",
+        "status_invalid": "Invalid status.",
+        "select_failure_first": "Please select the failure reason first.",
+        "qr_photo_not_found": "I could not find that photo.",
+        "status_update_failed": "Could not update status. It may have already been marked.",
+        "status_marked_caption_update_failed": "Marked {status}, but I could not update the QR caption for: {targets}.",
+        "qr_failed_notice": "❌ QR failed\n🆔 ID: {public_id}\n📝 Reason: {reason}",
+        "qr_done_notice": "✅ QR marked done\n🆔 ID: {public_id}\n💳 Balance has been updated.",
+        "qr_status_caption_fallback": "{emoji} QR marked {status}\n🆔 ID: {public_id}\nThe status is saved, but I could not update the old QR caption, so this message confirms the final status.",
+        "qr_marked_failed_sender_notice": "❌ QR marked failed. Reason sent to sender.",
+        "qr_status_updated_caption": "{emoji} Status updated in the QR caption: {status}.",
+        "offer_taken_text": "⛔ Offer expired. Another receiver already accepted this QR.\n🆔 {offer_id_label}: {public_id}",
+    },
+    "id": {
+        "payment_check_running": "Pemeriksaan pembayaran masih berjalan.\n{unlock_text}",
+        "txid_hint": "_(TxID biasanya dimulai dengan 0x... — temukan di riwayat transaksi wallet Anda)_",
+        "status_invalid": "Status tidak valid.",
+        "select_failure_first": "Harap pilih alasan kegagalan terlebih dahulu.",
+        "qr_photo_not_found": "Saya tidak dapat menemukan foto QR tersebut.",
+        "status_update_failed": "Tidak dapat memperbarui status. Mungkin sudah ditandai.",
+        "status_marked_caption_update_failed": "Ditandai {status}, tetapi saya tidak dapat memperbarui caption QR untuk: {targets}.",
+        "qr_failed_notice": "❌ QR gagal\n🆔 ID: {public_id}\n📝 Alasan: {reason}",
+        "qr_done_notice": "✅ QR ditandai selesai\n🆔 ID: {public_id}\n💳 Saldo telah diperbarui.",
+        "qr_status_caption_fallback": "{emoji} QR ditandai {status}\n🆔 ID: {public_id}\nStatus sudah tersimpan, tetapi caption QR lama tidak dapat diperbarui, jadi pesan ini mengonfirmasi status akhir.",
+        "qr_marked_failed_sender_notice": "❌ QR ditandai gagal. Alasan dikirim ke pengirim.",
+        "qr_status_updated_caption": "{emoji} Status diperbarui di caption QR: {status}.",
+        "offer_taken_text": "⛔ Penawaran kedaluwarsa. Penerima lain sudah menerima QR ini.\n🆔 {offer_id_label}: {public_id}",
+    },
+    "vi": {
+        "payment_check_running": "Quá trình kiểm tra thanh toán vẫn đang chạy.\n{unlock_text}",
+        "txid_hint": "_(TxID thường bắt đầu bằng 0x... — tìm trong lịch sử giao dịch ví của bạn)_",
+        "status_invalid": "Trạng thái không hợp lệ.",
+        "select_failure_first": "Vui lòng chọn lý do thất bại trước.",
+        "qr_photo_not_found": "Tôi không tìm thấy ảnh QR đó.",
+        "status_update_failed": "Không thể cập nhật trạng thái. Có thể nó đã được đánh dấu.",
+        "status_marked_caption_update_failed": "Đã đánh dấu {status}, nhưng tôi không thể cập nhật chú thích QR cho: {targets}.",
+        "qr_failed_notice": "❌ QR thất bại\n🆔 ID: {public_id}\n📝 Lý do: {reason}",
+        "qr_done_notice": "✅ QR đã được đánh dấu hoàn tất\n🆔 ID: {public_id}\n💳 Số dư đã được cập nhật.",
+        "qr_status_caption_fallback": "{emoji} QR đã được đánh dấu {status}\n🆔 ID: {public_id}\nTrạng thái đã được lưu, nhưng tôi không thể cập nhật chú thích QR cũ, nên tin nhắn này xác nhận trạng thái cuối cùng.",
+        "qr_marked_failed_sender_notice": "❌ QR đã được đánh dấu thất bại. Lý do đã được gửi cho người gửi.",
+        "qr_status_updated_caption": "{emoji} Trạng thái đã được cập nhật trong chú thích QR: {status}.",
+        "offer_taken_text": "⛔ Ưu đãi đã hết hạn. Một người nhận khác đã chấp nhận QR này.\n🆔 {offer_id_label}: {public_id}",
+    },
+    "zh": {
+        "payment_check_running": "付款检查仍在运行。\n{unlock_text}",
+        "txid_hint": "_(TxID 通常以 0x... 开头 — 可在您的钱包交易历史中找到)_",
+        "status_invalid": "状态无效。",
+        "select_failure_first": "请先选择失败原因。",
+        "qr_photo_not_found": "我找不到该 QR 照片。",
+        "status_update_failed": "无法更新状态。它可能已经被标记。",
+        "status_marked_caption_update_failed": "已标记为 {status}，但我无法更新以下 QR 说明：{targets}。",
+        "qr_failed_notice": "❌ QR 失败\n🆔 ID：{public_id}\n📝 原因：{reason}",
+        "qr_done_notice": "✅ QR 已标记为完成\n🆔 ID：{public_id}\n💳 余额已更新。",
+        "qr_status_caption_fallback": "{emoji} QR 已标记为{status}\n🆔 ID：{public_id}\n状态已保存，但旧的 QR 说明无法更新，因此此消息确认最终状态。",
+        "qr_marked_failed_sender_notice": "❌ QR 已标记为失败。原因已发送给发送方。",
+        "qr_status_updated_caption": "{emoji} 状态已在 QR 说明中更新：{status}。",
+        "offer_taken_text": "⛔ 报价已过期。另一位接收方已经接受了此 QR。\n🆔 {offer_id_label}：{public_id}",
+    },
+    "es": {
+        "payment_check_running": "La verificación del pago sigue en curso.\n{unlock_text}",
+        "txid_hint": "_(El TxID normalmente empieza con 0x... — búscalo en el historial de transacciones de tu billetera)_",
+        "status_invalid": "Estado inválido.",
+        "select_failure_first": "Selecciona primero el motivo del fallo.",
+        "qr_photo_not_found": "No pude encontrar esa foto QR.",
+        "status_update_failed": "No se pudo actualizar el estado. Puede que ya haya sido marcado.",
+        "status_marked_caption_update_failed": "Marcado {status}, pero no pude actualizar el caption del QR para: {targets}.",
+        "qr_failed_notice": "❌ QR fallido\n🆔 ID: {public_id}\n📝 Motivo: {reason}",
+        "qr_done_notice": "✅ QR marcado como completado\n🆔 ID: {public_id}\n💳 El saldo se ha actualizado.",
+        "qr_status_caption_fallback": "{emoji} QR marcado como {status}\n🆔 ID: {public_id}\nEl estado se guardó, pero no pude actualizar el caption antiguo del QR, así que este mensaje confirma el estado final.",
+        "qr_marked_failed_sender_notice": "❌ QR marcado como fallido. El motivo fue enviado al remitente.",
+        "qr_status_updated_caption": "{emoji} Estado actualizado en el caption del QR: {status}.",
+        "offer_taken_text": "⛔ Oferta vencida. Otro receptor ya aceptó este QR.\n🆔 {offer_id_label}: {public_id}",
+    },
+}
+for _code, _items in _STATUS_FLOW_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _STATUS_FLOW_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
+_ADMIN_ORDER_USER_NOTICE_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "admin_order_status_changed": "🛠 QR order status changed by admin",
+        "order_id_label": "Order ID",
+        "status_change_line": "Status: {old_status} → {new_status}",
+        "sender_wallet_refunded": "💳 ${amount} USDT has been added back to your wallet balance.",
+        "sender_reserve_released": "💳 ${amount} USDT reserve has been released back to your available balance.",
+        "sender_wallet_charged": "💳 ${amount} USDT has been deducted from your wallet balance.",
+        "use_wallet_balance": "Use /wallet to view your balance.",
+        "receiver_earnings_deducted": "💰 ${amount} USDT has been deducted from your earnings for this order.",
+        "receiver_earnings_credited": "💰 ${amount} USDT has been credited to your earnings for this order.",
+        "receiver_earnings_no_change": "No receiver earnings change was needed for this order.",
+        "use_earnings_balance": "Use /earnings to view your balance.",
+    },
+    "id": {
+        "admin_order_status_changed": "🛠 Status pesanan QR diubah oleh admin",
+        "order_id_label": "ID Pesanan",
+        "status_change_line": "Status: {old_status} → {new_status}",
+        "sender_wallet_refunded": "💳 ${amount} USDT telah ditambahkan kembali ke saldo wallet Anda.",
+        "sender_reserve_released": "💳 Cadangan ${amount} USDT telah dilepaskan kembali ke saldo tersedia Anda.",
+        "sender_wallet_charged": "💳 ${amount} USDT telah dipotong dari saldo wallet Anda.",
+        "use_wallet_balance": "Gunakan /wallet untuk melihat saldo Anda.",
+        "receiver_earnings_deducted": "💰 ${amount} USDT telah dipotong dari earnings Anda untuk pesanan ini.",
+        "receiver_earnings_credited": "💰 ${amount} USDT telah dikreditkan ke earnings Anda untuk pesanan ini.",
+        "receiver_earnings_no_change": "Tidak diperlukan perubahan earnings penerima untuk pesanan ini.",
+        "use_earnings_balance": "Gunakan /earnings untuk melihat saldo Anda.",
+    },
+    "vi": {
+        "admin_order_status_changed": "🛠 Admin đã thay đổi trạng thái đơn QR",
+        "order_id_label": "ID đơn hàng",
+        "status_change_line": "Trạng thái: {old_status} → {new_status}",
+        "sender_wallet_refunded": "💳 ${amount} USDT đã được cộng lại vào số dư ví của bạn.",
+        "sender_reserve_released": "💳 Khoản giữ ${amount} USDT đã được giải phóng về số dư khả dụng của bạn.",
+        "sender_wallet_charged": "💳 ${amount} USDT đã bị trừ khỏi số dư ví của bạn.",
+        "use_wallet_balance": "Dùng /wallet để xem số dư.",
+        "receiver_earnings_deducted": "💰 ${amount} USDT đã bị trừ khỏi thu nhập của bạn cho đơn này.",
+        "receiver_earnings_credited": "💰 ${amount} USDT đã được cộng vào thu nhập của bạn cho đơn này.",
+        "receiver_earnings_no_change": "Không cần thay đổi thu nhập người nhận cho đơn này.",
+        "use_earnings_balance": "Dùng /earnings để xem số dư.",
+    },
+    "zh": {
+        "admin_order_status_changed": "🛠 管理员已更改 QR 订单状态",
+        "order_id_label": "订单 ID",
+        "status_change_line": "状态：{old_status} → {new_status}",
+        "sender_wallet_refunded": "💳 ${amount} USDT 已退回到您的钱包余额。",
+        "sender_reserve_released": "💳 ${amount} USDT 预留金额已释放回您的可用余额。",
+        "sender_wallet_charged": "💳 ${amount} USDT 已从您的钱包余额中扣除。",
+        "use_wallet_balance": "使用 /wallet 查看您的余额。",
+        "receiver_earnings_deducted": "💰 此订单已从您的收益中扣除 ${amount} USDT。",
+        "receiver_earnings_credited": "💰 此订单已向您的收益中计入 ${amount} USDT。",
+        "receiver_earnings_no_change": "此订单不需要更改接收方收益。",
+        "use_earnings_balance": "使用 /earnings 查看您的余额。",
+    },
+    "es": {
+        "admin_order_status_changed": "🛠 El admin cambió el estado del pedido QR",
+        "order_id_label": "ID de pedido",
+        "status_change_line": "Estado: {old_status} → {new_status}",
+        "sender_wallet_refunded": "💳 ${amount} USDT se agregó de vuelta a tu saldo de billetera.",
+        "sender_reserve_released": "💳 La reserva de ${amount} USDT se liberó de vuelta a tu saldo disponible.",
+        "sender_wallet_charged": "💳 ${amount} USDT se dedujo de tu saldo de billetera.",
+        "use_wallet_balance": "Usa /wallet para ver tu saldo.",
+        "receiver_earnings_deducted": "💰 ${amount} USDT se dedujo de tus ganancias por este pedido.",
+        "receiver_earnings_credited": "💰 ${amount} USDT se acreditó a tus ganancias por este pedido.",
+        "receiver_earnings_no_change": "No fue necesario cambiar las ganancias del receptor para este pedido.",
+        "use_earnings_balance": "Usa /earnings para ver tu saldo.",
+    },
+}
+for _code, _items in _ADMIN_ORDER_USER_NOTICE_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _ADMIN_ORDER_USER_NOTICE_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+_CLAIM_ALERT_TRANSLATIONS = {
+    "en": {
+        "claim_only_active_receivers": "Only active receivers can accept offers.",
+        "claim_admin_not_active": "Admin account is not active in the bot. Send /start first.",
+        "claim_offline_or_limit_zero": "You are offline or your limit is 0. Use /on LIMIT first.",
+        "claim_offer_not_found": "Offer not found.",
+        "claim_offer_expired": "Offer expired.",
+        "claim_offer_taken": "Offer expired. Another receiver already accepted this QR.",
+        "claim_success": "Claimed.",
+    },
+    "id": {
+        "claim_only_active_receivers": "Hanya penerima aktif yang dapat menerima penawaran.",
+        "claim_admin_not_active": "Akun admin belum aktif di bot. Kirim /start terlebih dahulu.",
+        "claim_offline_or_limit_zero": "Anda sedang offline atau limit Anda 0. Gunakan /on LIMIT terlebih dahulu.",
+        "claim_offer_not_found": "Penawaran tidak ditemukan.",
+        "claim_offer_expired": "Penawaran kedaluwarsa.",
+        "claim_offer_taken": "Penawaran kedaluwarsa. Penerima lain sudah menerima QR ini.",
+        "claim_success": "Diklaim.",
+    },
+    "vi": {
+        "claim_only_active_receivers": "Chỉ người nhận đang hoạt động mới có thể nhận ưu đãi.",
+        "claim_admin_not_active": "Tài khoản admin chưa hoạt động trong bot. Hãy gửi /start trước.",
+        "claim_offline_or_limit_zero": "Bạn đang offline hoặc giới hạn của bạn là 0. Hãy dùng /on LIMIT trước.",
+        "claim_offer_not_found": "Không tìm thấy ưu đãi.",
+        "claim_offer_expired": "Ưu đãi đã hết hạn.",
+        "claim_offer_taken": "Ưu đãi đã hết hạn. Một người nhận khác đã chấp nhận QR này.",
+        "claim_success": "Đã nhận.",
+    },
+    "zh": {
+        "claim_only_active_receivers": "只有在线接收方可以接受报价。",
+        "claim_admin_not_active": "管理员账号尚未在 bot 中激活。请先发送 /start。",
+        "claim_offline_or_limit_zero": "您当前离线或限额为 0。请先使用 /on LIMIT。",
+        "claim_offer_not_found": "未找到报价。",
+        "claim_offer_expired": "报价已过期。",
+        "claim_offer_taken": "报价已过期。另一位接收方已经接受了此 QR。",
+        "claim_success": "已接受。",
+    },
+    "es": {
+        "claim_only_active_receivers": "Solo los receptores activos pueden aceptar ofertas.",
+        "claim_admin_not_active": "La cuenta admin no está activa en el bot. Envía /start primero.",
+        "claim_offline_or_limit_zero": "Estás offline o tu límite es 0. Usa /on LIMIT primero.",
+        "claim_offer_not_found": "Oferta no encontrada.",
+        "claim_offer_expired": "Oferta vencida.",
+        "claim_offer_taken": "Oferta vencida. Otro receptor ya aceptó este QR.",
+        "claim_success": "Aceptado.",
+    },
+}
+for _code, _items in _CLAIM_ALERT_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _CLAIM_ALERT_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+_PAYMENT_ALERT_TRANSLATIONS = {
+    "en": {
+        "payment_detected_processing": "✅ Payment detected! Processing...",
+        "payment_not_found_yet_running": "❌ Payment not found yet. Payment check is still running. {unlock_text}",
+    },
+    "id": {
+        "payment_detected_processing": "✅ Pembayaran terdeteksi! Sedang diproses...",
+        "payment_not_found_yet_running": "❌ Pembayaran belum ditemukan. Pemeriksaan pembayaran masih berjalan. {unlock_text}",
+    },
+    "vi": {
+        "payment_detected_processing": "✅ Đã phát hiện thanh toán! Đang xử lý...",
+        "payment_not_found_yet_running": "❌ Chưa tìm thấy thanh toán. Việc kiểm tra thanh toán vẫn đang chạy. {unlock_text}",
+    },
+    "zh": {
+        "payment_detected_processing": "✅ 已检测到付款！正在处理...",
+        "payment_not_found_yet_running": "❌ 尚未找到付款。付款检查仍在进行中。{unlock_text}",
+    },
+    "es": {
+        "payment_detected_processing": "✅ ¡Pago detectado! Procesando...",
+        "payment_not_found_yet_running": "❌ Pago aún no encontrado. La verificación del pago sigue en curso. {unlock_text}",
+    },
+}
+for _code, _items in _PAYMENT_ALERT_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _PAYMENT_ALERT_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+_SUPPORT_FALLBACK_TRANSLATIONS = {
+    "en": {"support_not_configured": "Support is not configured yet. Please contact the owner."},
+    "id": {"support_not_configured": "Dukungan belum dikonfigurasi. Silakan hubungi pemilik."},
+    "vi": {"support_not_configured": "Hỗ trợ chưa được cấu hình. Vui lòng liên hệ chủ sở hữu."},
+    "zh": {"support_not_configured": "尚未配置支持信息。请联系所有者。"},
+    "es": {"support_not_configured": "El soporte aún no está configurado. Contacta con el propietario."},
+}
+for _code, _items in _SUPPORT_FALLBACK_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _SUPPORT_FALLBACK_TRANSLATIONS["en"].items():
         _TRANSLATIONS[_code].setdefault(_k, _v)
 
 
@@ -2184,6 +2629,20 @@ def find_photo_by_public_id(public_id: str) -> PhotoRow | None:
     return row_to_photo(row)
 
 
+def sender_lifetime_balance_used(chat_id: int) -> Decimal:
+    """Total sender wallet balance actually used on currently completed QR orders."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(charged_usdt), 0) AS total
+            FROM photos
+            WHERE sender_chat_id = ? AND status = 'done'
+            """,
+            (int(chat_id),),
+        ).fetchone()
+    return _dec(row["total"] if row else 0)
+
+
 def get_photo_record(public_id: str) -> sqlite3.Row | None:
     with get_conn() as conn:
         return conn.execute("SELECT * FROM photos WHERE public_id = ?", (public_id,)).fetchone()
@@ -2232,6 +2691,26 @@ def clean_failure_reason_text(reason: str | None, max_len: int = 600) -> str:
     if len(text) > max_len:
         text = text[: max_len - 1].rstrip() + "…"
     return text
+
+
+def normalize_status_callback_action(value: object) -> str:
+    """Accept only Done/Failed status actions while tolerating older localized callback data."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    compact = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    if compact in {"done", "complete", "completed", "success", "successful", "ok"}:
+        return "done"
+    if compact in {"failed", "fail", "failure", "reject", "rejected"}:
+        return "failed"
+    text = raw.lower()
+    done_markers = ("done", "complete", "completed", "success", "selesai", "hoàn tất", "hoan tat", "完成", "completado", "hecho")
+    failed_markers = ("failed", "fail", "gagal", "thất bại", "that bai", "失败", "fallido")
+    if any(marker in text for marker in done_markers):
+        return "done"
+    if any(marker in text for marker in failed_markers):
+        return "failed"
+    return ""
 
 
 def update_photo_status(public_id: str, status: str, status_by: int, failure_reason: str | None = None) -> bool:
@@ -2466,10 +2945,27 @@ def setting_decimal(key: str, default: str | Decimal) -> Decimal:
     return _dec(_setting_raw(key, str(default)), str(default))
 
 
+def setting_sender_rate_decimal() -> Decimal:
+    """Sender charge per completed scan.
+
+    Older installs/settings can contain sender_rate_usdt=0 because the original
+    environment default was 0.  That made QR captions show Reserved $0.00 and
+    could make completion settle at $0.00.  Treat a zero/blank saved sender rate
+    as the configured default charge (0.50 USDT unless DEFAULT_SENDER_RATE_USDT
+    is explicitly changed).  This preserves the intended per-order charge while
+    still allowing operators to change the rate from the admin Marketplace page.
+    """
+    amount = setting_decimal("sender_rate_usdt", DEFAULT_SENDER_RATE_USDT)
+    default_amount = _dec(DEFAULT_SENDER_RATE_USDT, "0.50")
+    if amount <= 0 and default_amount > 0:
+        return default_amount
+    return max(Decimal("0"), amount)
+
+
 def get_marketplace_settings() -> dict[str, Decimal | int | bool | str]:
     return {
         "maintenance_mode": setting_bool("maintenance_mode", False),
-        "sender_rate_usdt": setting_decimal("sender_rate_usdt", DEFAULT_SENDER_RATE_USDT),
+        "sender_rate_usdt": setting_sender_rate_decimal(),
         "receiver_rate_usdt": setting_decimal("receiver_rate_usdt", DEFAULT_RECEIVER_RATE_USDT),
         "qr_expire_minutes": setting_int("qr_expire_minutes", QR_EXPIRE_MINUTES),
         "payment_timeout_minutes": setting_int("payment_timeout_minutes", PAYMENT_TIMEOUT_MINUTES),
@@ -2504,6 +3000,59 @@ def get_marketplace_settings() -> dict[str, Decimal | int | bool | str]:
         "binance_pay_history_lookback_seconds": setting_int("binance_pay_history_lookback_seconds", BINANCE_PAY_HISTORY_LOOKBACK_SECONDS),
     }
 
+
+def _row_dec(row, key: str, default: Decimal | str | int | float = "0") -> Decimal:
+    """Safely read a Decimal from sqlite rows/dicts without crashing on older schemas."""
+    try:
+        if row is not None and hasattr(row, "keys") and key in row.keys():
+            return _dec(row[key], default)
+        if isinstance(row, dict) and key in row:
+            return _dec(row.get(key), default)
+    except Exception:
+        pass
+    return _dec(default)
+
+
+def effective_sender_charge_amount(row, *, use_current_setting_if_missing: bool = False) -> Decimal:
+    """Return the money that belongs to this QR order.
+
+    Some older/in-progress rows can have sender_rate_usdt saved as 0 after UI/text
+    changes, even though a reserve exists in photos.reserved_usdt or the sender wallet.
+    For settlement and captions, use the strongest order snapshot available instead of
+    trusting only sender_rate_usdt.  This keeps language translations from affecting
+    monetary values and prevents showing/charging $0.00 for a $0.50 reserved order.
+    """
+    candidates = [
+        _row_dec(row, "charged_usdt"),
+        _row_dec(row, "reserved_usdt"),
+        _row_dec(row, "sender_rate_usdt"),
+    ]
+    amount = max([c for c in candidates if c is not None] or [Decimal("0")])
+    if amount <= 0 and use_current_setting_if_missing:
+        try:
+            amount = _dec(get_marketplace_settings().get("sender_rate_usdt", "0"))
+        except Exception:
+            amount = Decimal("0")
+    return max(Decimal("0"), amount)
+
+
+def effective_sender_reserved_display(row, fallback_amount: Decimal | str | float | int | None = None) -> Decimal:
+    """Amount to show on sender QR captions as Reserved.
+
+    Prefer the per-order reserved/charged snapshot.  If the row is not available, use
+    the supplied fallback amount.  As a last resort for still-pending QR captions, use
+    the current admin sender rate so users never see $0.00 when the configured charge
+    is $0.50.
+    """
+    amount = effective_sender_charge_amount(row, use_current_setting_if_missing=False) if row is not None else Decimal("0")
+    if amount <= 0 and fallback_amount is not None:
+        amount = _dec(fallback_amount)
+    if amount <= 0:
+        try:
+            amount = _dec(get_marketplace_settings().get("sender_rate_usdt", "0"))
+        except Exception:
+            amount = Decimal("0")
+    return max(Decimal("0"), amount)
 
 def maintenance_mode_enabled() -> bool:
     return bool(get_marketplace_settings()["maintenance_mode"])
@@ -2607,7 +3156,7 @@ def settle_photo_wallets(public_id: str, status: str) -> None:
         if not row or row["settled_at"]:
             conn.rollback()
             return
-        sender_rate = _dec(row["sender_rate_usdt"])
+        sender_rate = effective_sender_charge_amount(row, use_current_setting_if_missing=True)
         receiver_rate = _dec(row["receiver_rate_usdt"])
         sender_chat_id = int(row["sender_chat_id"])
         receiver_chat_id = int(row["receiver_chat_id"] or 0)
@@ -2718,7 +3267,7 @@ def admin_override_photo_status(public_id: str, new_status: str, *, failure_reas
 
         sender_chat_id = int(row["sender_chat_id"])
         receiver_chat_id = int(row["receiver_chat_id"] or 0)
-        sender_rate = _dec(row["sender_rate_usdt"])
+        sender_rate = effective_sender_charge_amount(row, use_current_setting_if_missing=True)
         receiver_rate = _dec(row["receiver_rate_usdt"])
         charged_prev = _dec(row["charged_usdt"])
         earned_prev = _dec(row["earned_usdt"])
@@ -3040,6 +3589,15 @@ def active_receivers(limit: int = 1000) -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def total_marketplace_capacity() -> int:
+    """Return total live marketplace capacity across all online receivers.
+
+    This is intentionally an aggregate number only. It does not expose which
+    receiver changed their limit, nor any receiver name, username, or chat ID.
+    """
+    return sum(int(r["limit_remaining"] or 0) for r in online_receivers())
+
+
 def active_senders(limit: int = 1000) -> list[sqlite3.Row]:
     admin_clause, admin_params = _admin_id_clause("u.chat_id")
     role_clause = f"(u.role = 'sender' OR {admin_clause})"
@@ -3170,29 +3728,29 @@ def marketplace_status_text(for_chat_id: int | None = None) -> str:
     capacity = sum(int(r["limit_remaining"] or 0) for r in receivers)
     settings = get_marketplace_settings()
     text = (
-        "📡 Marketplace status\n\n"
-        f"🟢 Online receivers: {len(receivers)}\n"
-        f"📊 Current scan capacity: {capacity}\n"
-        f"⏱ QR expiry: {settings['qr_expire_minutes']} minutes\n"
+        f"{tr_chat(for_chat_id, 'marketplace_status_title')}\n\n"
+        f"{tr_chat(for_chat_id, 'marketplace_online_receivers', count=len(receivers))}\n"
+        f"{tr_chat(for_chat_id, 'marketplace_capacity', capacity=capacity)}\n"
+        f"{tr_chat(for_chat_id, 'marketplace_qr_expiry', minutes=settings['qr_expire_minutes'])}\n"
     )
     if settings["maintenance_mode"]:
-        text += "\n🚧 Maintenance mode is ON. New QR submissions are paused.\n"
+        text += f"\n{tr_chat(for_chat_id, 'marketplace_maintenance_on')}\n"
     if for_chat_id:
         user = get_user(for_chat_id)
         if user and user.role == "sender":
             wallet = get_wallet(for_chat_id)
             rate = _dec(settings["sender_rate_usdt"])
             available = _dec(wallet["balance_usdt"]) - _dec(wallet["reserved_usdt"])
-            text += f"\n💼 Your available balance: ${_money(available)} USDT\n"
+            text += f"\n{tr_chat(for_chat_id, 'marketplace_your_available_balance', amount=_money(available))}\n"
             if rate > 0:
                 scans = str(max(0, int(available // rate)))
-                text += f"🧾 Estimated scans available: {scans}\n"
+                text += f"{tr_chat(for_chat_id, 'marketplace_estimated_scans', scans=scans)}\n"
         elif user and user.role == "receiver":
             presence = receiver_presence_row(for_chat_id)
             if presence and presence["online"]:
-                text += f"\nYour receiver status: 🟢 online, {presence['limit_remaining']} / {presence['limit_total']} scans left.\n"
+                text += f"\n{tr_chat(for_chat_id, 'marketplace_receiver_online_status', remaining=presence['limit_remaining'], total=presence['limit_total'])}\n"
             else:
-                text += "\nYour receiver status: 🔴 offline. Use /on LIMIT to go online.\n"
+                text += f"\n{tr_chat(for_chat_id, 'marketplace_receiver_offline_status')}\n"
     return text
 
 
@@ -3469,7 +4027,7 @@ def cancel_open_order_in_db(public_id: str, sender_chat_id: int) -> tuple[bool, 
             return False, "cancel_order_wait", row, seconds_left
 
         now = now_iso()
-        sender_rate = _dec(row["sender_rate_usdt"])
+        sender_rate = effective_sender_charge_amount(row, use_current_setting_if_missing=True)
         release_amount = Decimal("0")
         _wallet_snapshot(conn, sender_chat_id)
         if sender_rate > 0:
@@ -6761,14 +7319,16 @@ def build_sender_offer_caption(
     *,
     expires_at: str | None = None,
     sender_rate: Decimal | str | float | int | None = None,
+    order_row=None,
     chat_id: int | None = None,
 ) -> str:
     lines = [build_caption(date_str, daily_no, public_id, chat_id), "", status_line]
     if expires_at:
         lines.append(f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}")
         lines.append(tr_chat(chat_id, "receiver_time_left_line", time_left=format_time_left_for_chat(chat_id, expires_at)))
-    if sender_rate is not None:
-        lines.append(f"💳 {tr_chat(chat_id, 'caption_reserved')}: ${_money(sender_rate)} USDT")
+    if sender_rate is not None or order_row is not None:
+        reserved_amount = effective_sender_reserved_display(order_row, sender_rate)
+        lines.append(f"💳 {tr_chat(chat_id, 'caption_reserved')}: ${_money(reserved_amount)} USDT")
     return "\n".join(lines)
 
 
@@ -6943,7 +7503,7 @@ def main_menu_text(user: UserRow | None, chat_id: int) -> str:
         return tr_chat(chat_id, "registered_sender")
     if user and user.active and user.role == "receiver":
         return tr_chat(chat_id, "registered_receiver")
-    return tr_chat(chat_id, "not_registered_menu", chat_id=chat_id, support=html.escape(support_display_text()))
+    return tr_chat(chat_id, "not_registered_menu", chat_id=chat_id, support=html.escape(support_display_text(chat_id)))
 
 
 def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) -> str:
@@ -7045,7 +7605,7 @@ async def support_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     chat_id = update.effective_chat.id
     await update.message.reply_text(
-        tr_chat(chat_id, "support_text", support=support_display_text()),
+        tr_chat(chat_id, "support_text", support=support_display_text(chat_id)),
         reply_markup=support_keyboard(include_back=False, chat_id=chat_id),
     )
 
@@ -7566,7 +8126,7 @@ async def on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     sent, failed = await notify_active_senders(
         context,
         key="notify_receiver_online",
-        limit=limit,
+        capacity=total_marketplace_capacity(),
     )
     logger.info("Receiver %s online; notified senders sent=%s failed=%s", chat_id, sent, failed)
 
@@ -7620,6 +8180,23 @@ async def limit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(tr_chat(chat_id, "limit_adjusted", delta=delta_text, remaining=remaining, total=total))
     else:
         await update.message.reply_text(tr_chat(chat_id, "limit_adjusted_offline", delta=delta_text, remaining=remaining, total=total))
+
+    # Notify senders when marketplace receiver capacity changes. Do not include
+    # receiver names, usernames, or chat IDs; only publish the capacity change.
+    notify_key = "notify_receiver_limit_added" if delta > 0 else "notify_receiver_limit_reduced"
+    sent, failed = await notify_active_senders(
+        context,
+        key=notify_key,
+        change=abs(delta),
+        capacity=total_marketplace_capacity(),
+    )
+    logger.info(
+        "Receiver %s adjusted limit by %+d; notified senders sent=%s failed=%s",
+        chat_id,
+        delta,
+        sent,
+        failed,
+    )
 
 
 async def marketplace_status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -7711,32 +8288,32 @@ def _payment_label(network: str) -> str:
     return "USDT (BEP20)"
 
 
-def _payment_title(network: str) -> str:
+def _payment_title(network: str, chat_id: int | None = None) -> str:
     network = (network or "bep20").lower()
     if network == "polygon":
-        return "🟣 *USDT (POLYGON) Payment*"
+        return tr_chat(chat_id, "payment_title_polygon")
     if network == "binance":
-        return "🟡 *Binance Pay*"
-    return "🟡 *USDT (BEP20) Payment*"
+        return tr_chat(chat_id, "payment_title_binance")
+    return tr_chat(chat_id, "payment_title_bep20")
 
 
-def _network_line(network: str, confirmations: int | None = None) -> str:
+def _network_line(network: str, confirmations: int | None = None, chat_id: int | None = None) -> str:
     network = (network or "bep20").lower()
     if network == "polygon":
-        base = "🌐 Network: *Polygon PoS*"
+        base = tr_chat(chat_id, "network_polygon")
     elif network == "binance":
-        base = "🌐 Network: *Binance Pay*"
+        base = tr_chat(chat_id, "network_binance")
     else:
-        base = "🌐 Network: *BNB Smart Chain (BEP20)*"
+        base = tr_chat(chat_id, "network_bep20")
     if confirmations and network in {"bep20", "polygon"}:
-        return base + f"\n✅ Payment will be confirmed after *{confirmations} network confirmations*."
+        return base + "\n" + tr_chat(chat_id, "network_confirm_after", confirmations=confirmations)
     return base
 
 
 def _deposit_payment_keyboard(dep: sqlite3.Row) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🔄 Check Payment", callback_data=f"checkpay:{dep['ref_id']}"),
-        InlineKeyboardButton("✍️ Manual Verify", callback_data=f"manualpay:{dep['ref_id']}"),
+        InlineKeyboardButton(tr_chat(int(dep["chat_id"]), "btn_check_payment"), callback_data=f"checkpay:{dep['ref_id']}"),
+        InlineKeyboardButton(tr_chat(int(dep["chat_id"]), "btn_manual_verify"), callback_data=f"manualpay:{dep['ref_id']}"),
     ]])
 
 
@@ -7780,30 +8357,20 @@ def _manual_unlock_text(dep: sqlite3.Row | dict) -> tuple[bool, str]:
         age_seconds = delay_minutes * 60
     remaining = max(0, delay_minutes * 60 - int(age_seconds))
     if remaining <= 0:
-        return True, "Manual Verify is unlocked now."
+        return True, tr_chat(int(dep.get("chat_id") or dep["chat_id"]), "manual_verify_unlocked") if isinstance(dep, dict) else tr_chat(int(dep["chat_id"]), "manual_verify_unlocked")
     minutes = max(1, (remaining + 59) // 60)
-    return False, f"Manual Verify unlocks in about {minutes} minute(s)."
+    return False, tr_chat(int(dep.get("chat_id") or dep["chat_id"]), "manual_verify_unlocks", minutes=minutes) if isinstance(dep, dict) else tr_chat(int(dep["chat_id"]), "manual_verify_unlocks", minutes=minutes)
 
 
 def _deposit_expired_text(dep: sqlite3.Row) -> str:
     settings = get_marketplace_settings()
     timeout_minutes = max(1, int(settings.get("payment_timeout_minutes") or PAYMENT_TIMEOUT_MINUTES))
-    return (
-        "⏰ *Wallet Top-up Expired*\n\n"
-        f"Wallet Top-up ID: `{dep['ref_id']}`\n"
-        f"The payment was not completed within *{timeout_minutes} minutes*.\n\n"
-        "Please start a new wallet top-up."
-    )
+    return tr_chat(int(dep["chat_id"]), "wallet_topup_expired", ref_id=dep["ref_id"], minutes=timeout_minutes)
 
 
 def _deposit_pending_reminder_text(dep: sqlite3.Row) -> str:
     remaining_minutes = max(1, (_deposit_seconds_left(dep) + 59) // 60)
-    return (
-        "⌛ Wallet Top-up Still Pending\n\n"
-        f"Wallet Top-up ID: `{dep['ref_id']}`\n\n"
-        f"Your payment is still pending. It will expire in about *{remaining_minutes} minutes* if payment is not completed.\n\n"
-        "If you already paid, use the payment buttons in the original message or contact support."
-    )
+    return tr_chat(int(dep["chat_id"]), "wallet_topup_still_pending", ref_id=dep["ref_id"], minutes=remaining_minutes)
 
 
 def save_deposit_payment_message(ref_id: str, chat_id: int, message_id: int, template: str) -> None:
@@ -7856,12 +8423,7 @@ async def clear_deposit_payment_buttons(bot, dep: sqlite3.Row) -> None:
 async def send_wallet_topup_completed_message(bot, chat_id: int, amount_usdt, balance_usdt) -> None:
     await bot.send_message(
         chat_id=int(chat_id),
-        text=(
-            "✅ Wallet Top-up Completed!\n\n"
-            f"💰 ${_money(amount_usdt)} USDT added to your wallet.\n"
-            f"👛 Current USDT Balance: ${_money(balance_usdt)}\n\n"
-            "Use /wallet to check your balance."
-        ),
+        text=tr_chat(chat_id, "wallet_topup_completed", amount=_money(amount_usdt), balance=_money(balance_usdt)),
         protect_content=PROTECT_CONTENT,
     )
 
@@ -7917,7 +8479,7 @@ async def send_deposit_completed_message(bot, dep: sqlite3.Row) -> None:
 async def send_wallet_topup_rejected_message(bot, chat_id: int) -> None:
     await bot.send_message(
         chat_id=int(chat_id),
-        text="❌ Your payment could not be verified. Please contact support if you believe this is a mistake.",
+        text=tr_chat(chat_id, "wallet_topup_rejected"),
         protect_content=PROTECT_CONTENT,
     )
 
@@ -7979,19 +8541,19 @@ def _manual_failure_is_user_fixable(reason: str) -> bool:
 
 
 
-def _payment_status_label(status: str, credited_at: str | None = None) -> str:
+def _payment_status_label(status: str, credited_at: str | None = None, chat_id: int | None = None) -> str:
     status = str(status or "").lower()
     if credited_at or status == "credited":
-        return "✅ Completed"
+        return tr_chat(chat_id, "payment_status_completed")
     if status == "expired":
-        return "❌ Expired"
+        return tr_chat(chat_id, "payment_status_expired")
     if status == "rejected":
-        return "❌ Rejected"
+        return tr_chat(chat_id, "payment_status_rejected")
     if status == "manual_pending":
-        return "📝 Submitted for review"
+        return tr_chat(chat_id, "payment_status_review")
     if status == "waiting":
-        return "⏳ Pending"
-    return status.replace("_", " ").title() or "Pending"
+        return tr_chat(chat_id, "payment_status_pending")
+    return status.replace("_", " ").title() or tr_chat(chat_id, "payment_status_pending")
 
 
 def _payment_method_label(method: str | None, network: str | None = None) -> str:
@@ -8003,27 +8565,17 @@ def _payment_method_label(method: str | None, network: str | None = None) -> str
     return "USDT (BEP20)"
 
 
-def _wallet_ledger_label(row: sqlite3.Row) -> str:
+def _wallet_ledger_label(row: sqlite3.Row, chat_id: int | None = None) -> str:
     kind = str(row["kind"] or "").lower()
     amount = _dec(row["amount_usdt"])
     if kind in {"manual_sender_adjust", "manual_receiver_adjust"}:
-        return "Admin Wallet Add" if amount >= 0 else "Admin Wallet Remove"
-    if kind == "receiver_payout_mark_paid":
-        return "Earnings Payout Paid"
-    if kind == "qr_done_debit":
-        return "QR Scan Charge"
-    if kind == "qr_done_earn":
-        return "QR Scan Earning"
-    if kind == "qr_failed_release":
-        return "QR Reserve Released"
-    if kind == "deposit_credit":
-        return "Wallet Top-up Credit"
+        return tr_chat(chat_id, "wallet_label_admin_add") if amount >= 0 else tr_chat(chat_id, "wallet_label_admin_remove")
     return kind.replace("_", " ").title() or "Wallet Update"
 
 
-def _wallet_ledger_payment_method_label(row: sqlite3.Row) -> str:
+def _wallet_ledger_payment_method_label(row: sqlite3.Row, chat_id: int | None = None) -> str:
     amount = _dec(row["amount_usdt"])
-    return "Admin wallet add" if amount >= 0 else "Admin wallet remove"
+    return tr_chat(chat_id, "wallet_method_admin_add") if amount >= 0 else tr_chat(chat_id, "wallet_method_admin_remove")
 
 
 def _wallet_history_entries(chat_id: int) -> list[dict]:
@@ -8045,7 +8597,7 @@ def _wallet_history_entries(chat_id: int) -> list[dict]:
             "method": _payment_method_label(dep["method"], dep["network"]),
             "amount": _dec(dep["amount_usdt"]),
             "expected": _dec(dep["expected_usdt"]),
-            "status": _payment_status_label(dep["status"], dep["credited_at"]),
+            "status": _payment_status_label(dep["status"], dep["credited_at"], chat_id),
             "note": str(dep["manual_note"] or "").strip(),
         })
     allowed_admin_adjustments = {"manual_sender_adjust", "manual_receiver_adjust"}
@@ -8059,8 +8611,8 @@ def _wallet_history_entries(chat_id: int) -> list[dict]:
         entries.append({
             "type": "ledger",
             "created_at": str(row["created_at"] or ""),
-            "label": _wallet_ledger_label(row),
-            "method": _wallet_ledger_payment_method_label(row),
+            "label": _wallet_ledger_label(row, chat_id),
+            "method": _wallet_ledger_payment_method_label(row, chat_id),
             "amount": _dec(row["amount_usdt"]),
             "balance_after": row["balance_after"],
             "note": str(row["note"] or "").strip(),
@@ -8076,42 +8628,42 @@ def _wallet_history_text(chat_id: int, page: int = 0, page_size: int = 10) -> tu
     total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
     page = max(0, min(int(page or 0), total_pages - 1))
     shown = entries[page * page_size:(page + 1) * page_size]
-    lines = [f"<b>👛 Wallet History — Page {page + 1}/{total_pages}</b>", "Showing wallet top-ups and admin balance updates, newest first.", ""]
+    lines = [f"<b>{esc(tr_chat(chat_id, 'wallet_history_title', page=page + 1, total_pages=total_pages))}</b>", tr_chat(chat_id, "wallet_history_showing"), ""]
     if not shown:
-        lines.append("No wallet history yet.")
+        lines.append(tr_chat(chat_id, "wallet_history_empty"))
     else:
         for idx, item in enumerate(shown, start=1):
             if idx > 1:
                 lines.append("")
             if item["type"] == "deposit":
                 lines.extend([
-                    f"<b>Wallet Top-up ID</b> <code>{esc(item['ref_id'])}</code>",
-                    f"<b>Date/Time:</b> {esc(_history_datetime(item['created_at']))}",
-                    f"<b>Payment Method:</b> {esc(item['method'])}",
-                    f"<b>Amount:</b> ${_money(item['amount'])} USDT",
-                    f"<b>Status:</b> {esc(item['status'])}",
+                    f"<b>{esc(tr_chat(chat_id, 'wallet_topup_id'))}</b> <code>{esc(item['ref_id'])}</code>",
+                    f"<b>{esc(tr_chat(chat_id, 'date_time'))}:</b> {esc(_history_datetime(item['created_at']))}",
+                    f"<b>{esc(tr_chat(chat_id, 'payment_method_label'))}:</b> {esc(item['method'])}",
+                    f"<b>{esc(tr_chat(chat_id, 'amount_label'))}:</b> ${_money(item['amount'])} USDT",
+                    f"<b>{esc(tr_chat(chat_id, 'status'))}:</b> {esc(item['status'])}",
                 ])
             else:
                 amount = _dec(item["amount"])
                 sign = "+" if amount >= 0 else "-"
                 lines.extend([
                     f"<b>{esc(item['label'])}</b>",
-                    f"<b>Date/Time:</b> {esc(_history_datetime(item['created_at']))}",
-                    f"<b>Payment Method:</b> {esc(item['method'])}",
-                    f"<b>Amount:</b> {sign}${_money(abs(amount))} USDT",
-                    "<b>Status:</b> ✅ Completed",
+                    f"<b>{esc(tr_chat(chat_id, 'date_time'))}:</b> {esc(_history_datetime(item['created_at']))}",
+                    f"<b>{esc(tr_chat(chat_id, 'payment_method_label'))}:</b> {esc(item['method'])}",
+                    f"<b>{esc(tr_chat(chat_id, 'amount_label'))}:</b> {sign}${_money(abs(amount))} USDT",
+                    f"<b>{esc(tr_chat(chat_id, 'status'))}:</b> {esc(tr_chat(chat_id, 'payment_status_completed'))}",
                 ])
                 if item.get("related_id"):
-                    lines.append(f"<b>Related ID:</b> <code>{esc(item['related_id'])}</code>")
+                    lines.append(f"<b>{esc(tr_chat(chat_id, 'related_id_label'))}:</b> <code>{esc(item['related_id'])}</code>")
     buttons: list[list[InlineKeyboardButton]] = []
     nav: list[InlineKeyboardButton] = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"wallet_history:{page-1}"))
+        nav.append(InlineKeyboardButton(tr_chat(chat_id, "btn_prev"), callback_data=f"wallet_history:{page-1}"))
     if page + 1 < total_pages:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"wallet_history:{page+1}"))
+        nav.append(InlineKeyboardButton(tr_chat(chat_id, "btn_next"), callback_data=f"wallet_history:{page+1}"))
     if nav:
         buttons.append(nav)
-    buttons.append([InlineKeyboardButton("➕ Top-up Again", callback_data="nav:loadwallet")])
+    buttons.append([InlineKeyboardButton(tr_chat(chat_id, "btn_topup_again"), callback_data="nav:loadwallet")])
     buttons.append([InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")])
     return "\n".join(lines), InlineKeyboardMarkup(buttons)
 
@@ -8245,6 +8797,7 @@ async def poll_single_deposit_payment(application: Application, ref_id: str) -> 
             return
 
 async def _send_deposit_payment_message(message, dep: sqlite3.Row, context: ContextTypes.DEFAULT_TYPE | None = None) -> None:
+    chat_id = int(dep["chat_id"])
     network = str(dep["network"] or "bep20").lower()
     expected = _money3(dep["expected_usdt"])
     amount = _money(dep["amount_usdt"])
@@ -8253,33 +8806,24 @@ async def _send_deposit_payment_message(message, dep: sqlite3.Row, context: Cont
     settings = get_marketplace_settings()
     confirmations = int(settings.get("polygon_required_confirmations") if network == "polygon" else settings.get("bep20_required_confirmations") or 0)
     if network == "binance":
-        details = (
-            f"🆔 Binance Pay ID: `{pay_to}`\n"
-            f"👤 Name: {esc(pay_to_name or 'Binance Pay')}\n\n"
-            "*Steps:*\n"
-            f"1️⃣ Open Binance app → Pay → Send\n"
-            f"2️⃣ Search Pay ID: `{pay_to}`\n"
-            "3️⃣ Send exactly the unique USDT amount above\n\n"
-            "⚠️ Do not round the amount. The unique decimals identify your wallet top-up automatically.\n"
-            f"🌐 Network: *Binance Pay*\n"
-        )
+        details = tr_chat(chat_id, "payment_binance_details", pay_to=pay_to, name=esc(pay_to_name or "Binance Pay"))
     else:
-        details = (
-            "To this wallet:\n"
-            f"`{pay_to}`\n\n"
-            "⚠️ Send the exact amount shown above. The final USDT received must be exact; do not let exchange/network fees reduce this amount.\n"
-            f"{_network_line(network, confirmations)}\n"
+        details = tr_chat(
+            chat_id,
+            "payment_wallet_details",
+            pay_to=pay_to,
+            network_line=_network_line(network, confirmations, chat_id),
         )
     interval_seconds = int(get_marketplace_settings().get("payment_watch_interval_seconds") or PAYMENT_WATCH_INTERVAL_SECONDS)
-    template = (
-        f"{_payment_title(network)}\n\n"
-        f"📋 Wallet Top-up ID `{dep['ref_id']}` | ${amount} USDT\n\n"
-        "Send this amount:\n"
-        f"```\n{expected} USDT\n```\n"
-        f"{details}\n"
-        "⏳ Time left: *{{TIME_LEFT}}*\n"
-        f"🔄 Bot checks automatically every {interval_seconds} seconds until this top-up is credited or expired.\n"
-        "🧾 If you already paid and it is not verified, tap *Manual Verify* below."
+    template = tr_chat(
+        chat_id,
+        "payment_template",
+        title=_payment_title(network, chat_id),
+        ref_id=dep["ref_id"],
+        amount=amount,
+        expected=expected,
+        details=details,
+        interval_seconds=interval_seconds,
     )
     sent = await message.reply_text(
         _render_payment_template(template, dep),
@@ -8355,7 +8899,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     if data == "nav:support":
         await query.edit_message_text(
-            tr_chat(chat_id, "support_text", support=support_display_text()),
+            tr_chat(chat_id, "support_text", support=support_display_text(chat_id)),
             reply_markup=support_keyboard(include_back=True, chat_id=chat_id),
         )
         return
@@ -8457,9 +9001,9 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if data == "nav:dispute":
         DISPUTE_FLOW[chat_id] = {"public_id": None, "step": "reason"}
         await query.edit_message_text(
-            "⚠️ *Open dispute*\n\nPlease send the reason for this dispute now.",
+            tr_chat(chat_id, "dispute_open", qr_line=""),
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Cancel", callback_data="nav:home")]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:home")]]),
         )
         return
     if data == "nav:stats":
@@ -8483,11 +9027,11 @@ async def wallet_currency_button(update: Update, context: ContextTypes.DEFAULT_T
     chat_id = query.message.chat.id
     user = get_user_for_chat(chat_id)
     if not can_use_sender_features(chat_id, user):
-        await query.answer("Only active senders can load wallet.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "only_active_senders_load"), show_alert=True)
         return
     network = (query.data or "").split(":", 1)[1].strip().lower()
     if not payment_method_enabled(network):
-        await query.answer("That payment method is disabled right now.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "topup_processed_or_expired"), show_alert=True)
         return
     await query.answer()
     await _send_topup_amount_prompt(query, chat_id, network)
@@ -8500,7 +9044,7 @@ async def qr_history_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     chat_id = query.message.chat.id
     user = get_user_for_chat(chat_id)
     if not is_active_user_or_admin(chat_id, user):
-        await query.answer("You are not registered.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "not_registered"), show_alert=True)
         return
     await query.answer()
     try:
@@ -8518,7 +9062,7 @@ async def wallet_history_button(update: Update, context: ContextTypes.DEFAULT_TY
     chat_id = query.message.chat.id
     user = get_user_for_chat(chat_id)
     if not is_active_user_or_admin(chat_id, user):
-        await query.answer("You are not registered.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "not_registered"), show_alert=True)
         return
     await query.answer()
     try:
@@ -8548,32 +9092,32 @@ async def check_payment_button(update: Update, context: ContextTypes.DEFAULT_TYP
     ref_id = (query.data or "").split(":", 1)[1].strip().upper()
     dep = get_deposit(ref_id)
     if not dep:
-        await _safe_callback_answer(query, "Payment session not found.", show_alert=True)
+        await _safe_callback_answer(query, tr_chat(query.from_user.id, "payment_not_found"), show_alert=True)
         return
     if int(dep["chat_id"]) != int(query.from_user.id):
-        await _safe_callback_answer(query, "This payment session is not yours.", show_alert=True)
+        await _safe_callback_answer(query, tr_chat(query.from_user.id, "payment_not_yours"), show_alert=True)
         return
     if dep["credited_at"] or dep["status"] in {"credited", "confirmed"}:
-        await _safe_callback_answer(query, "✅ Wallet top-up already completed.", show_alert=True)
+        await _safe_callback_answer(query, tr_chat(query.from_user.id, "topup_already_completed"), show_alert=True)
         try:
             await send_deposit_completed_message(context.bot, dep)
         except TelegramError:
             pass
         return
     if dep["status"] not in ACTIVE_PAYMENT_CHECK_STATUSES:
-        await _safe_callback_answer(query, "⚠️ This payment session is already processed or expired.", show_alert=True)
+        await _safe_callback_answer(query, tr_chat(query.from_user.id, "topup_processed_or_expired"), show_alert=True)
         await delete_deposit_payment_message(context.bot, dep)
         return
 
     # Answer immediately before the chain scan. If the Polygon RPC fallback takes
     # more than Telegram's callback-query window, the handler can still finish and
     # send the same completion message as BEP20.
-    answered = await _safe_callback_answer(query, "🔄 Checking payment...", show_alert=False)
+    answered = await _safe_callback_answer(query, tr_chat(query.from_user.id, "checking_payment"), show_alert=False)
     tx_hash = str(dep["tx_hash"] or "").strip() or None
     use_hash = tx_hash
     ok, reason = await verify_and_credit_deposit_async(ref_id, use_hash, False, "check_button")
     if ok:
-        await _safe_callback_answer(query, "✅ Payment detected! Processing...", show_alert=False)
+        await _safe_callback_answer(query, tr_chat(query.from_user.id, "payment_detected_processing"), show_alert=False)
         try:
             dep_after = get_deposit(ref_id) or dep
             await send_deposit_completed_message(context.bot, dep_after)
@@ -8581,7 +9125,7 @@ async def check_payment_button(update: Update, context: ContextTypes.DEFAULT_TYP
             pass
     else:
         _unlocked, unlock_text = _manual_unlock_text(dep)
-        not_found_text = f"❌ Payment not found yet. Payment check is still running. {unlock_text}"
+        not_found_text = tr_chat(query.from_user.id, "payment_not_found_yet_running", unlock_text=unlock_text)
         final_answered = await _safe_callback_answer(query, not_found_text, show_alert=True)
         if answered and not final_answered:
             try:
@@ -8597,35 +9141,35 @@ async def manual_payment_button(update: Update, context: ContextTypes.DEFAULT_TY
     ref_id = (query.data or "").split(":", 1)[1].strip().upper()
     dep = get_deposit(ref_id)
     if not dep:
-        await query.answer("Payment session not found.", show_alert=True)
+        await query.answer(tr_chat(query.from_user.id, "payment_not_found"), show_alert=True)
         return
     if int(dep["chat_id"]) != int(query.from_user.id):
-        await query.answer("This payment session is not yours.", show_alert=True)
+        await query.answer(tr_chat(query.from_user.id, "payment_not_yours"), show_alert=True)
         return
     active_manual = MANUAL_TXHASH_FLOW.get(int(query.from_user.id)) or {}
     if active_manual.get("ref_id") == ref_id and active_manual.get("step") == "screenshot":
-        await query.answer("Please send the screenshot proof first.", show_alert=True)
+        await query.answer(tr_chat(query.from_user.id, "payment_screenshot_first"), show_alert=True)
         return
     if dep["credited_at"] or dep["status"] in {"credited", "confirmed"}:
-        await query.answer("✅ Wallet top-up already completed.", show_alert=True)
+        await query.answer(tr_chat(query.from_user.id, "topup_already_completed"), show_alert=True)
         try:
             await send_deposit_completed_message(context.bot, dep)
         except TelegramError:
             pass
         return
     if dep["status"] != "waiting":
-        await query.answer("⚠️ This payment session is already processed or expired.", show_alert=True)
+        await query.answer(tr_chat(query.from_user.id, "topup_processed_or_expired"), show_alert=True)
         await delete_deposit_payment_message(context.bot, dep)
         return
 
     unlocked, unlock_text = _manual_unlock_text(dep)
     if not unlocked:
-        await query.answer(f"Payment check is still running.\n{unlock_text}", show_alert=True)
+        await query.answer(tr_chat(query.from_user.id, "payment_check_running") + "\n" + unlock_text, show_alert=True)
         return
 
     network = str(dep["network"] or dep["method"] or "").lower()
     if network == "binance":
-        await query.answer("Checking Binance Pay history...", show_alert=False)
+        await query.answer(tr_chat(query.from_user.id, "checking_binance_history"), show_alert=False)
         ok, reason = await verify_and_credit_deposit_async(ref_id, None, True, "manual_binance")
         if ok:
             dep_after = get_deposit(ref_id) or dep
@@ -8638,19 +9182,13 @@ async def manual_payment_button(update: Update, context: ContextTypes.DEFAULT_TY
                     (reason[:500], now_iso(), ref_id),
                 )
             await delete_deposit_payment_message(context.bot, dep)
-            await query.message.reply_text(
-                "⏳ Manual Binance Pay verification submitted for review.\n"
-                f"Reference: {ref_id}"
-            )
+            await query.message.reply_text(tr_chat(query.from_user.id, "manual_verification_submitted", ref_id=ref_id))
         return
 
     MANUAL_TXHASH_FLOW[int(query.from_user.id)] = {"step": "txn_hash", "ref_id": ref_id}
     await query.answer()
     await query.message.reply_text(
-        "🔍 *Manual USDT Verification*\n\n"
-        "Please send your *USDT transaction hash / TxID* first.\n"
-        "After that, you will be asked for a screenshot proof.\n\n"
-        "_(TxID usually starts with 0x... — find it in your wallet's transaction history)_",
+        tr_chat(query.from_user.id, "manual_hash_prompt") + "\n\n" + tr_chat(query.from_user.id, "txid_hint"),
         parse_mode="Markdown",
     )
 
@@ -8664,7 +9202,7 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     text = update.message.text.strip()
     if chat_id in FAIL_REASON_FLOW:
-        await update.message.reply_text("Please select one of the failure reason buttons.")
+        await update.message.reply_text(tr_chat(chat_id, "select_failure_buttons_only"))
         return
     if chat_id in DISPUTE_REPLY_FLOW:
         await submit_dispute_chat_reply(update.message, chat_id, text)
@@ -8684,23 +9222,23 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if chat_id in MANUAL_TXHASH_FLOW:
         state = MANUAL_TXHASH_FLOW.get(chat_id) or {}
         if state.get("step") == "screenshot":
-            await update.message.reply_text("📸 Please send a screenshot/photo proof, not text.")
+            await update.message.reply_text(tr_chat(chat_id, "send_screenshot_not_text"))
             return
         ref_id = str(state.get("ref_id") or "").upper()
         tx_hash = text.strip()
         dep = get_deposit(ref_id)
         if not dep or int(dep["chat_id"]) != chat_id:
             MANUAL_TXHASH_FLOW.pop(chat_id, None)
-            await update.message.reply_text("Payment session not found anymore.")
+            await update.message.reply_text(tr_chat(chat_id, "payment_session_gone"))
             return
         if dep["credited_at"] or dep["status"] != "waiting":
             MANUAL_TXHASH_FLOW.pop(chat_id, None)
-            await update.message.reply_text("⚠️ This payment session is already processed or expired.")
+            await update.message.reply_text(tr_chat(chat_id, "topup_processed_or_expired"))
             return
         if not re.fullmatch(r"0x[a-fA-F0-9]{64}", tx_hash):
-            await update.message.reply_text("❌ Please send a valid USDT transaction hash / TxID. It should look like `0x...`", parse_mode="Markdown")
+            await update.message.reply_text(tr_chat(chat_id, "invalid_tx_hash"), parse_mode="Markdown")
             return
-        checking_msg = await update.message.reply_text("🔎 Checking transaction hash...")
+        checking_msg = await update.message.reply_text(tr_chat(chat_id, "checking_tx_hash"))
         try:
             ok, reason = await verify_and_credit_deposit_async(ref_id, tx_hash, True, "manual_tx_hash")
         finally:
@@ -8720,8 +9258,7 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if _manual_failure_is_amount_mismatch(reason) or _manual_failure_is_amount_mismatch(public_reason):
                 MANUAL_TXHASH_FLOW[chat_id] = {"step": "screenshot", "ref_id": ref_id, "tx_hash": tx_hash, "reason": public_reason}
                 await update.message.reply_text(
-                    "📸 Please send a screenshot proof of this USDT payment.\n\n"
-                    "Your TxHash needs admin review before this wallet top-up can be approved.",
+                    tr_chat(chat_id, "txhash_admin_review"),
                     parse_mode="Markdown",
                 )
                 return
@@ -8729,19 +9266,16 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 MANUAL_TXHASH_FLOW[chat_id] = {"step": "txn_hash", "ref_id": ref_id}
                 if "already been used" in public_reason.lower() or "already linked" in public_reason.lower() or "duplicate" in public_reason.lower():
                     await update.message.reply_text(
-                        "❌ This transaction hash has already been used for a wallet top-up.\n\n"
-                        "Please submit a different, unused USDT transaction hash."
+                        tr_chat(chat_id, "txhash_already_used")
                     )
                 else:
                     await update.message.reply_text(
-                        "❌ The transaction hash you submitted is incorrect.\n\n"
-                        "Please send the correct USDT transaction hash / TxID for this wallet top-up."
+                        tr_chat(chat_id, "txhash_incorrect")
                     )
                 return
             MANUAL_TXHASH_FLOW[chat_id] = {"step": "screenshot", "ref_id": ref_id, "tx_hash": tx_hash, "reason": public_reason}
             await update.message.reply_text(
-                "📸 Now send a screenshot proof of this USDT payment.\n\n"
-                "If the TxHash could not be auto-verified, support will review the proof.",
+                tr_chat(chat_id, "screenshot_proof_next"),
                 parse_mode="Markdown",
             )
         return
@@ -8751,16 +9285,16 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     try:
         amount = _dec(text)
     except Exception:
-        await update.message.reply_text("❌ Enter a valid number.")
+        await update.message.reply_text(tr_chat(chat_id, "enter_valid_number"))
         return
     if amount <= 0:
-        await update.message.reply_text("❌ Amount must be greater than zero.")
+        await update.message.reply_text(tr_chat(chat_id, "amount_gt_zero"))
         return
     network = str(state.get("network") or "bep20")
     settings = get_marketplace_settings()
     min_topup = _dec(settings.get("wallet_min_usdt"), DEFAULT_MIN_WALLET_TOPUP_USDT)
     if amount < min_topup:
-        await update.message.reply_text(f"❌ Minimum top-up amount is ${_money(min_topup)}.")
+        await update.message.reply_text(tr_chat(chat_id, "minimum_topup_amount", amount=_money(min_topup)))
         return
     WALLET_TOPUP_FLOW.pop(chat_id, None)
     try:
@@ -8779,14 +9313,14 @@ async def wallet_manual_screenshot_flow(update: Update, context: ContextTypes.DE
     if not state or state.get("step") != "screenshot":
         return False
     if not update.message.photo:
-        await update.message.reply_text("📸 Please send a screenshot/photo proof.")
+        await update.message.reply_text(tr_chat(chat_id, "send_screenshot_proof"))
         return True
     ref_id = str(state.get("ref_id") or "").upper()
     tx_hash = str(state.get("tx_hash") or "").strip()
     dep = get_deposit(ref_id)
     MANUAL_TXHASH_FLOW.pop(chat_id, None)
     if not dep or int(dep["chat_id"]) != chat_id:
-        await update.message.reply_text("Payment session not found anymore.")
+        await update.message.reply_text(tr_chat(chat_id, "payment_session_gone"))
         return True
     proof_file_id = update.message.photo[-1].file_id
     normalized_hash = normalize_tx_hash(tx_hash)
@@ -8802,7 +9336,7 @@ async def wallet_manual_screenshot_flow(update: Update, context: ContextTypes.DE
             allow_existing_for_ref=True,
         )
         if not reserved:
-            await update.message.reply_text("❌ This transaction hash has already been used for another wallet top-up.")
+            await update.message.reply_text(tr_chat(chat_id, "txhash_used_other"))
             return True
     with get_conn() as conn:
         conn.execute(
@@ -8818,8 +9352,7 @@ async def wallet_manual_screenshot_flow(update: Update, context: ContextTypes.DE
         )
     await delete_deposit_payment_message(context.bot, dep)
     await update.message.reply_text(
-        "⏳ Manual verification submitted for admin review.\n"
-        f"Reference: {ref_id}",
+        tr_chat(chat_id, "manual_verification_submitted", ref_id=ref_id),
     )
     return True
 
@@ -8831,10 +9364,10 @@ async def earnings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     chat_id = update.effective_chat.id
     user = get_user_for_chat(chat_id)
     if not is_active_user_or_admin(chat_id, user):
-        await update.message.reply_text("You are not registered yet.")
+        await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
     if not can_use_receiver_features(chat_id, user):
-        await update.message.reply_text("Only active receivers can use /earnings.")
+        await update.message.reply_text(tr_chat(chat_id, "only_active_receivers_earnings"))
         return
     await update.message.reply_text(
         _receiver_earnings_text(chat_id),
@@ -8848,12 +9381,7 @@ async def _send_withdraw_amount_prompt(message_or_query, chat_id: int) -> None:
     min_payout = _dec(settings["min_payout_usdt"])
     _wallet, due, requested, available, _paid = receiver_earnings_numbers(chat_id)
     WITHDRAW_FLOW[chat_id] = {"step": "amount"}
-    text = (
-        "💸 Withdraw\n"
-        f"Available: ${_money(available)} USDT\n"
-        f"Minimum: ${_money(min_payout)} USDT\n\n"
-        "Send quantity."
-    )
+    text = tr_chat(chat_id, "withdraw_prompt", available=_money(available), minimum=_money(min_payout))
     markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]])
     if hasattr(message_or_query, "edit_message_text"):
         await message_or_query.edit_message_text(text, reply_markup=markup)
@@ -8866,8 +9394,8 @@ async def _send_withdraw_details_prompt(message_or_query, chat_id: int, amount: 
     if amount is not None:
         state["amount"] = str(amount)
     WITHDRAW_FLOW[chat_id] = state
-    text = "💳 Send payment details."
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Cancel", callback_data="nav:wallet")]])
+    text = tr_chat(chat_id, "send_payment_details")
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:wallet")]])
     if hasattr(message_or_query, "edit_message_text"):
         await message_or_query.edit_message_text(text, reply_markup=markup)
     else:
@@ -8876,14 +9404,11 @@ async def _send_withdraw_details_prompt(message_or_query, chat_id: int, amount: 
 
 async def _send_withdraw_payment_choice_prompt(message_or_query, chat_id: int, amount: Decimal, saved_details: str) -> None:
     WITHDRAW_FLOW[chat_id] = {"step": "payment_choice", "amount": str(amount)}
-    text = (
-        "💳 Payment details?\n"
-        f"Quantity: ${_money(amount)} USDT"
-    )
+    text = tr_chat(chat_id, "payment_details_question", amount=_money(amount))
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton(payment_method_button_label(saved_details), callback_data="withdraw:use_saved")],
-        [InlineKeyboardButton("✏️ Enter new payment details", callback_data="withdraw:new_details")],
-        [InlineKeyboardButton("⬅️ Cancel", callback_data="nav:wallet")],
+        [InlineKeyboardButton(tr_chat(chat_id, "btn_enter_new_payment_details"), callback_data="withdraw:new_details")],
+        [InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:wallet")],
     ])
     if hasattr(message_or_query, "edit_message_text"):
         await message_or_query.edit_message_text(text, reply_markup=markup)
@@ -8894,7 +9419,7 @@ async def _send_withdraw_payment_choice_prompt(message_or_query, chat_id: int, a
 async def _send_withdraw_prompt(message_or_query, chat_id: int) -> None:
     user = get_user_for_chat(chat_id)
     if not can_use_receiver_features(chat_id, user):
-        text = "Only active receivers can request payout."
+        text = tr_chat(chat_id, "only_active_receivers_payout")
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text)
         else:
@@ -8906,11 +9431,7 @@ async def _send_withdraw_prompt(message_or_query, chat_id: int) -> None:
     back_markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]])
     if available < min_payout:
         WITHDRAW_FLOW.pop(chat_id, None)
-        text = (
-            "💸 Withdraw\n"
-            f"Available: ${_money(available)} USDT\n"
-            f"Minimum: ${_money(min_payout)} USDT"
-        )
+        text = tr_chat(chat_id, "withdraw_no_available", available=_money(available), minimum=_money(min_payout))
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text, reply_markup=back_markup)
         else:
@@ -8927,7 +9448,7 @@ async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     chat_id = update.effective_chat.id
     user = get_user_for_chat(chat_id)
     if not can_use_receiver_features(chat_id, user):
-        await update.message.reply_text("Only active receivers can request payout.")
+        await update.message.reply_text(tr_chat(chat_id, "only_active_receivers_payout"))
         return
     if context.args:
         amount = _dec(context.args[0])
@@ -8944,7 +9465,7 @@ async def withdraw_button(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     data = query.data or "withdraw:start"
     user = get_user_for_chat(chat_id)
     if not can_use_receiver_features(chat_id, user):
-        await query.answer("Only active receivers can request payout.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "only_active_receivers_payout"), show_alert=True)
         return
     await query.answer()
     if data == "withdraw:start":
@@ -8973,11 +9494,11 @@ async def withdraw_button(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def submit_withdraw_details(message, chat_id: int, details_text: str) -> None:
     user = get_user_for_chat(chat_id)
     if not can_use_receiver_features(chat_id, user):
-        await message.reply_text("Only active receivers can request payout.")
+        await message.reply_text(tr_chat(chat_id, "only_active_receivers_payout"))
         return
     details = clean_payout_details_text(details_text)
     if len(details) < 4:
-        await message.reply_text("Send payment details.")
+        await message.reply_text(tr_chat(chat_id, "send_payment_details"))
         return
     save_receiver_payout_details(chat_id, details)
     state = WITHDRAW_FLOW.get(chat_id) or {}
@@ -8986,29 +9507,26 @@ async def submit_withdraw_details(message, chat_id: int, details_text: str) -> N
         amount = _dec(str(pending_amount), "-1")
         await submit_withdraw_request(message, chat_id, amount, details)
         return
-    await message.reply_text("✅ Payment details saved.")
+    await message.reply_text(tr_chat(chat_id, "payment_details_saved"))
     await _send_withdraw_amount_prompt(message, chat_id)
 
 
 async def submit_withdraw_amount(message, chat_id: int, amount: Decimal) -> None:
     user = get_user_for_chat(chat_id)
     if not can_use_receiver_features(chat_id, user):
-        await message.reply_text("Only active receivers can request payout.")
+        await message.reply_text(tr_chat(chat_id, "only_active_receivers_payout"))
         return
     settings = get_marketplace_settings()
     min_payout = _dec(settings["min_payout_usdt"])
     _wallet, due, requested, available, _paid = receiver_earnings_numbers(chat_id)
     if amount <= 0:
-        await message.reply_text("Send a valid quantity.")
+        await message.reply_text(tr_chat(chat_id, "send_valid_quantity"))
         return
     if amount < min_payout:
-        await message.reply_text(f"Minimum payout is ${_money(min_payout)} USDT.")
+        await message.reply_text(tr_chat(chat_id, "minimum_payout", amount=_money(min_payout)))
         return
     if amount > available:
-        await message.reply_text(
-            f"Available: ${_money(available)} USDT\n"
-            f"Due: ${_money(due)} USDT · Requested: ${_money(requested)} USDT"
-        )
+        await message.reply_text(tr_chat(chat_id, "withdraw_available_due", available=_money(available), due=_money(due), requested=_money(requested)))
         return
 
     saved_details = get_receiver_payout_details(chat_id)
@@ -9021,7 +9539,7 @@ async def submit_withdraw_amount(message, chat_id: int, amount: Decimal) -> None
 async def submit_withdraw_request(message_or_query, chat_id: int, amount: Decimal, payout_details: str) -> None:
     user = get_user_for_chat(chat_id)
     if not can_use_receiver_features(chat_id, user):
-        text = "Only active receivers can request payout."
+        text = tr_chat(chat_id, "only_active_receivers_payout")
         if hasattr(message_or_query, "edit_message_text"):
             await message_or_query.edit_message_text(text)
         else:
@@ -9033,7 +9551,7 @@ async def submit_withdraw_request(message_or_query, chat_id: int, amount: Decima
     if amount <= 0:
         text = "Send a valid quantity."
     elif amount < min_payout:
-        text = f"Minimum payout is ${_money(min_payout)} USDT."
+        text = tr_chat(chat_id, "minimum_payout", amount=_money(min_payout))
     elif amount > available:
         text = f"Available: ${_money(available)} USDT\nDue: ${_money(due)} USDT · Requested: ${_money(requested)} USDT"
     else:
@@ -9051,7 +9569,7 @@ async def submit_withdraw_request(message_or_query, chat_id: int, amount: Decima
     save_receiver_payout_details(chat_id, details)
     payout_id = create_payout_request(chat_id, amount, payout_details=details)
     WITHDRAW_FLOW.pop(chat_id, None)
-    text = f"✅ Withdrawal request #{payout_id} submitted for ${_money(amount)} USDT."
+    text = tr_chat(chat_id, "withdraw_submitted", payout_id=payout_id, amount=_money(amount))
     if hasattr(message_or_query, "edit_message_text"):
         await message_or_query.edit_message_text(text)
     else:
@@ -9074,13 +9592,13 @@ def _validate_dispute_public_id(chat_id: int, user: UserRow, public_id: str | No
         return True, None
     row = get_photo_record(public_id)
     if not row:
-        return False, "I could not find that QR ID."
+        return False, tr_chat(chat_id, "qr_id_not_found")
     if is_admin(chat_id):
         return True, None
     if user.role == "sender" and int(row["sender_chat_id"]) != chat_id:
-        return False, "That QR ID is not linked to your sender account."
+        return False, tr_chat(chat_id, "qr_not_linked_sender")
     if user.role == "receiver" and int(row["receiver_chat_id"] or 0) != chat_id:
-        return False, "That QR ID is not linked to your receiver account."
+        return False, tr_chat(chat_id, "qr_not_linked_receiver")
     return True, None
 
 
@@ -9091,7 +9609,7 @@ async def dispute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     chat_id = update.effective_chat.id
     user = get_user_for_chat(chat_id)
     if not is_active_user_or_admin(chat_id, user):
-        await update.message.reply_text("You are not registered yet.")
+        await update.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
 
     public_id = None
@@ -9102,15 +9620,13 @@ async def dispute_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     ok, error = _validate_dispute_public_id(chat_id, user, public_id)
     if not ok:
-        await update.message.reply_text(error or "Could not start that dispute.")
+        await update.message.reply_text(error or tr_chat(chat_id, "could_not_start_dispute"))
         return
 
     DISPUTE_FLOW[chat_id] = {"public_id": public_id, "step": "reason"}
-    qr_line = f"\nQR ID: `{public_id}`" if public_id else ""
+    qr_line = f"QR ID: `{public_id}`" if public_id else ""
     await update.message.reply_text(
-        "⚠️ *Open dispute*\n"
-        f"{qr_line}\n\n"
-        "Please send the reason for this dispute now.",
+        tr_chat(chat_id, "dispute_open", qr_line=qr_line),
         parse_mode="Markdown",
     )
 
@@ -9123,20 +9639,18 @@ async def dispute_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     chat_id = query.message.chat.id
     user = get_user_for_chat(chat_id)
     if not is_active_user_or_admin(chat_id, user):
-        await query.message.reply_text("You are not registered yet.")
+        await query.message.reply_text(tr_chat(chat_id, "not_registered"))
         return
     public_id = (query.data or "").split(":", 1)[1].strip()
     ok, error = _validate_dispute_public_id(chat_id, user, public_id)
     if not ok:
-        await query.message.reply_text(error or "Could not start that dispute.")
+        await query.message.reply_text(error or tr_chat(chat_id, "could_not_start_dispute"))
         return
     DISPUTE_FLOW[chat_id] = {"public_id": public_id, "step": "reason"}
     await query.message.reply_text(
-        "⚠️ *Open dispute*\n"
-        f"QR ID: `{public_id}`\n\n"
-        "Please send the reason for this dispute now.",
+        tr_chat(chat_id, "dispute_open", qr_line=f"QR ID: `{public_id}`"),
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Cancel", callback_data="nav:home")]]),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:home")]]),
     )
 
 
@@ -9149,15 +9663,15 @@ async def submit_dispute_reason(message, chat_id: int, reason: str) -> None:
     reason = reason.strip()
     if reason.lower() in {"cancel", "/cancel"}:
         DISPUTE_FLOW.pop(chat_id, None)
-        await message.reply_text("Dispute cancelled.")
+        await message.reply_text(tr_chat(chat_id, "dispute_cancelled"))
         return
     if len(reason) < 3:
-        await message.reply_text("Please send a clear reason for the dispute.")
+        await message.reply_text(tr_chat(chat_id, "dispute_reason_clear"))
         return
     state = DISPUTE_FLOW.pop(chat_id, {})
     public_id = state.get("public_id")
     ref_id = create_dispute(chat_id, public_id, reason)
-    await message.reply_text(f"✅ Dispute #{ref_id} submitted. Admin will review it soon.")
+    await message.reply_text(tr_chat(chat_id, "dispute_submitted", ref_id=ref_id))
     await notify_admins_new_dispute(ref_id, chat_id, public_id, reason)
 
 
@@ -9198,22 +9712,22 @@ async def dispute_reply_button(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         dispute_id = int(raw_id)
     except ValueError:
-        await query.answer("Dispute not found.", show_alert=True)
+        await query.answer(tr_chat(chat_id if "chat_id" in locals() else query.from_user.id, "dispute_not_found"), show_alert=True)
         return
     row = get_dispute_by_id(dispute_id)
     chat_id = int(query.from_user.id)
     if not row or int(row['chat_id']) != chat_id:
-        await query.answer("This dispute is not yours.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "dispute_not_yours"), show_alert=True)
         return
     if str(row['status'] or '').lower() not in {'open', 'under_review'}:
-        await query.answer("This dispute is already closed.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "dispute_closed"), show_alert=True)
         return
     ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
     DISPUTE_REPLY_FLOW[chat_id] = {"dispute_id": int(row['id']), "ref": ref}
     await query.answer()
     await query.message.reply_text(
-        f"💬 Reply to dispute #{ref}\n\nSend your message now.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Cancel", callback_data="nav:home")]]),
+        tr_chat(chat_id, "dispute_reply_prompt", ref=ref),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:home")]]),
     )
 
 
@@ -9221,23 +9735,23 @@ async def submit_dispute_chat_reply(message, chat_id: int, reply_text: str) -> N
     reply_text = str(reply_text or "").strip()
     if reply_text.lower() in {"cancel", "/cancel"}:
         DISPUTE_REPLY_FLOW.pop(chat_id, None)
-        await message.reply_text("Dispute reply cancelled.")
+        await message.reply_text(tr_chat(chat_id, "dispute_reply_cancelled"))
         return
     if len(reply_text) < 2:
-        await message.reply_text("Please send a clear reply.")
+        await message.reply_text(tr_chat(chat_id, "dispute_reply_clear"))
         return
     state = DISPUTE_REPLY_FLOW.pop(chat_id, {})
     dispute_id = int(state.get("dispute_id") or 0)
     row = get_dispute_by_id(dispute_id)
     if not row or int(row['chat_id']) != int(chat_id):
-        await message.reply_text("Dispute not found.")
+        await message.reply_text(tr_chat(chat_id, "dispute_not_found"))
         return
     if str(row['status'] or '').lower() not in {'open', 'under_review'}:
-        await message.reply_text("This dispute is already closed.")
+        await message.reply_text(tr_chat(chat_id, "dispute_closed"))
         return
     add_dispute_chat_message(dispute_id, "user", chat_id, reply_text)
     ref = str(row['ref_id'] or f"DSP{int(row['id']):06d}")
-    await message.reply_text(f"✅ Reply added to dispute #{ref}.")
+    await message.reply_text(tr_chat(chat_id, "dispute_reply_added", ref=ref))
     await notify_admins_dispute_reply(row, reply_text)
 
 
@@ -9246,18 +9760,18 @@ async def dispute_reply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     chat_id = update.effective_chat.id
     if not context.args:
-        await update.message.reply_text("Use: /disputereply DISPUTE_ID your message")
+        await update.message.reply_text(tr_chat(chat_id, "dispute_reply_usage"))
         return
     row = get_dispute_by_ref(context.args[0])
     if not row or int(row['chat_id']) != int(chat_id):
-        await update.message.reply_text("Dispute not found.")
+        await update.message.reply_text(tr_chat(chat_id, "dispute_not_found"))
         return
     if str(row['status'] or '').lower() not in {'open', 'under_review'}:
-        await update.message.reply_text("This dispute is already closed.")
+        await update.message.reply_text(tr_chat(chat_id, "dispute_closed"))
         return
     if len(context.args) == 1:
         DISPUTE_REPLY_FLOW[chat_id] = {"dispute_id": int(row['id']), "ref": str(row['ref_id'] or '')}
-        await update.message.reply_text(f"💬 Send your reply for dispute #{row['ref_id']} now.")
+        await update.message.reply_text(tr_chat(chat_id, "dispute_reply_send_now", ref=row['ref_id']))
         return
     reply_text = " ".join(context.args[1:]).strip()
     DISPUTE_REPLY_FLOW[chat_id] = {"dispute_id": int(row['id']), "ref": str(row['ref_id'] or '')}
@@ -9388,7 +9902,7 @@ async def send_offer_to_receivers_by_bot(bot, public_id: str) -> tuple[int, int]
             try:
                 msg = await bot.send_message(
                     chat_id=receiver_chat_id,
-                    text=build_offer_text(public_id, int(row["daily_no"]), _dec(row["sender_rate_usdt"]), _dec(row["receiver_rate_usdt"]), str(row["offer_expires_at"]), receiver_chat_id),
+                    text=build_offer_text(public_id, int(row["daily_no"]), effective_sender_charge_amount(row, use_current_setting_if_missing=True), _dec(row["receiver_rate_usdt"]), str(row["offer_expires_at"]), receiver_chat_id),
                     reply_markup=build_offer_keyboard(public_id, receiver_chat_id),
                     protect_content=PROTECT_CONTENT,
                 )
@@ -9423,7 +9937,7 @@ def reopen_failed_qr_in_db(public_id: str, expires_at: str) -> tuple[bool, str, 
     if not row["generated_file_id"]:
         return False, "This QR has no stored generated image, so it cannot be retried.", row
     sender_chat_id = int(row["sender_chat_id"])
-    sender_rate = _dec(row["sender_rate_usdt"])
+    sender_rate = effective_sender_charge_amount(row, use_current_setting_if_missing=True)
     if available_sender_balance(sender_chat_id) < sender_rate:
         return False, f"Sender available balance is too low to retry. Required: ${_money(sender_rate)} USDT.", row
     ok, reserve_msg = reserve_sender_funds(sender_chat_id, sender_rate, public_id)
@@ -9465,7 +9979,7 @@ async def admin_retry_qr_order(bot, public_id: str) -> tuple[bool, str]:
     sender_chat_id = int(row["sender_chat_id"])
     if sent <= 0:
         expire_offer_in_db(public_id, "expired")
-        release_sender_reserve(sender_chat_id, _dec(row["sender_rate_usdt"]), public_id, "Retry failed: no receiver could be notified")
+        release_sender_reserve(sender_chat_id, effective_sender_charge_amount(row, use_current_setting_if_missing=True), public_id, "Retry failed: no receiver could be notified")
         await edit_sender_offer_caption(
             bot,
             sender_chat_id,
@@ -9490,7 +10004,8 @@ async def admin_retry_qr_order(bot, public_id: str) -> tuple[bool, str]:
             public_id,
             tr_chat(sender_chat_id, "sender_offer_sent"),
             expires_at=expires_at,
-            sender_rate=_dec(row["sender_rate_usdt"]),
+            sender_rate=effective_sender_reserved_display(row),
+            order_row=row,
             chat_id=sender_chat_id,
         ),
         reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
@@ -9556,7 +10071,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     ok, reserve_msg = reserve_sender_funds(chat.id, sender_rate, public_id)
     if not ok:
-        await update.message.reply_text(reserve_msg)
+        await update.message.reply_text(
+            tr_chat(chat.id, "insufficient_wallet", required=_money(sender_rate), available=_money(available_sender_balance(chat.id)))
+        )
         return
 
     processing_ms = int((time.perf_counter() - started_at) * 1000)
@@ -9694,12 +10211,12 @@ async def complete_photo(
     failure_reason: str | None = None,
 ) -> tuple[bool, str]:
     if status not in {"done", "failed"}:
-        return False, "Invalid status."
+        return False, tr_chat(actor_chat_id, "status_invalid")
 
     if status == "failed":
         failure_reason = clean_failure_reason_text(failure_reason)
         if not failure_reason:
-            return False, "Please select the failure reason first."
+            return False, tr_chat(actor_chat_id, "select_failure_first")
 
     photo, error = await resolve_pending_photo_for_status(
         bot=bot,
@@ -9708,18 +10225,20 @@ async def complete_photo(
         reply_to_message_id=reply_to_message_id,
     )
     if error or not photo:
-        return False, error or "I could not find that photo."
+        return False, error or tr_chat(actor_chat_id, "qr_photo_not_found")
 
     ok = update_photo_status(photo.public_id, status, actor_chat_id, failure_reason=failure_reason)
     if not ok:
-        return False, "Could not update status. It may have already been marked."
+        return False, tr_chat(actor_chat_id, "status_update_failed")
 
     settle_photo_wallets(photo.public_id, status)
 
-    status_text = status.upper()
-    new_caption = build_status_caption(photo, status, failure_reason=failure_reason)
+    status_text = tr_chat(actor_chat_id, "stats_done") if status == "done" else tr_chat(actor_chat_id, "stats_failed")
+    receiver_caption = build_status_caption(photo, status, failure_reason=failure_reason, chat_id=photo.receiver_chat_id or actor_chat_id)
+    sender_caption = build_status_caption(photo, status, failure_reason=failure_reason, chat_id=photo.sender_chat_id)
     if status == "failed":
-        new_caption += "\n💳 Sender reserve released."
+        receiver_caption += f"\n💳 {tr_chat(photo.receiver_chat_id or actor_chat_id, 'caption_sender_reserve_released')}"
+        sender_caption += f"\n💳 {tr_chat(photo.sender_chat_id, 'caption_sender_reserve_released')}"
 
     # Update the existing QR photo captions on both sides. This avoids extra status messages.
     edit_errors: list[str] = []
@@ -9729,7 +10248,7 @@ async def complete_photo(
             await bot.edit_message_caption(
                 chat_id=photo.receiver_chat_id,
                 message_id=photo.receiver_message_id,
-                caption=new_caption,
+                caption=receiver_caption,
                 reply_markup=None,
             )
         except TelegramError as exc:
@@ -9748,26 +10267,28 @@ async def complete_photo(
             logger.warning("Could not edit sender QR caption %s/%s: %s", photo.sender_chat_id, photo.sender_message_id, exc)
             edit_errors.append("sender")
 
+    emoji = "✅" if status == "done" else "❌"
+
+    # The database status and wallet settlement are already saved above. Status updates
+    # are shown by editing the original QR messages only; do not send a separate
+    # "Done" confirmation message to the sender. If Telegram refuses to edit an old
+    # message, log it for admin/debugging but keep the saved wallet/order status intact.
     if edit_errors:
-        return False, f"Marked {status_text}, but I could not update the QR caption for: {', '.join(edit_errors)}."
+        logger.warning("QR %s marked %s but caption edit failed for: %s", photo.public_id, status, ', '.join(edit_errors))
 
     if status == "failed" and failure_reason:
         try:
             await bot.send_message(
                 chat_id=photo.sender_chat_id,
-                text=(
-                    "❌ QR failed\n"
-                    f"🆔 ID: {photo.public_id}\n"
-                    f"📝 Reason: {failure_reason}"
-                ),
+                text=tr_chat(photo.sender_chat_id, "qr_failed_notice", public_id=photo.public_id, reason=failure_reason),
+                protect_content=PROTECT_CONTENT,
             )
         except TelegramError as exc:
             logger.warning("Could not notify sender about failed QR %s: %s", photo.public_id, exc)
 
-    emoji = "✅" if status == "done" else "❌"
     if status == "failed":
-        return True, "❌ QR marked failed. Reason sent to sender."
-    return True, f"{emoji} Status updated in the QR caption: {status_text}."
+        return True, tr_chat(actor_chat_id, "qr_marked_failed_sender_notice")
+    return True, tr_chat(actor_chat_id, "qr_status_updated_caption", emoji=emoji, status=status_text)
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE, status: str) -> None:
@@ -9820,7 +10341,7 @@ async def start_failure_reason_flow(
         reply_to_message_id=reply_to_message_id,
     )
     if error or not photo:
-        await message.reply_text(error or "I could not find that QR.")
+        await message.reply_text(error or tr_chat(chat_id, "qr_not_found_generic"))
         return
     FAIL_REASON_FLOW.pop(chat_id, None)
     await message.reply_text(
@@ -9863,15 +10384,21 @@ async def fail_reason_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         _prefix, public_id, reason_key = (query.data or "").split(":", 2)
     except Exception:
-        await query.answer("Invalid failure reason.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_failure_reason"), show_alert=True)
         return
 
     reason = FAIL_REASON_CHOICES.get(reason_key)
     if not reason:
-        await query.answer("Invalid failure reason.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_failure_reason"), show_alert=True)
         return
 
     chat_id = query.message.chat.id
+    reason_label_keys = {
+        "qr_not_working": "fail_reason_qr_not_working",
+        "qr_expired": "fail_reason_qr_expired",
+        "limit_over": "fail_reason_limit_over",
+    }
+    localized_reason = tr_chat(chat_id, reason_label_keys.get(reason_key, reason_key))
     ok, result = await complete_photo(
         bot=context.bot,
         actor_chat_id=chat_id,
@@ -9886,13 +10413,31 @@ async def fail_reason_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await query.edit_message_text(
                 f"{tr_chat(chat_id, 'qr_marked_failed')}\n"
                 f"🆔 {tr_chat(chat_id, 'caption_id')}: {public_id}\n"
-                f"📝 {tr_chat(chat_id, 'caption_reason')}: {reason}"
+                f"📝 {tr_chat(chat_id, 'caption_reason')}: {localized_reason}"
             )
         except TelegramError:
             pass
         return
 
     await query.answer(result, show_alert=True)
+
+
+
+def localized_claim_offer_result(chat_id: int, result: str, public_id: str | None = None) -> str:
+    mapping = {
+        "Only active receivers can accept offers.": "claim_only_active_receivers",
+        "Admin account is not active in the bot. Send /start first.": "claim_admin_not_active",
+        "You are offline or your limit is 0. Use /on LIMIT first.": "claim_offline_or_limit_zero",
+        "Offer not found.": "claim_offer_not_found",
+        "Offer expired.": "claim_offer_expired",
+        "Offer expired. Another receiver already accepted this QR.": "claim_offer_taken",
+        "Claimed.": "claim_success",
+        "claim_offer_canceled": "claim_offer_canceled",
+    }
+    key = mapping.get(str(result or ""))
+    if not key:
+        return str(result or "")
+    return tr_chat(chat_id, key)
 
 
 async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9902,7 +10447,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         _action, public_id = query.data.split(":", 1)
     except Exception:
-        await query.answer("Invalid offer button.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_offer_button"), show_alert=True)
         return
     receiver_chat_id = query.message.chat.id
     ok, result, row, auto_off = claim_offer_in_db(public_id, receiver_chat_id)
@@ -9911,11 +10456,11 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
             if expired_ok and expired_row is not None:
                 await notify_qr_expired_by_timeout(context.bot, public_id, expired_row)
-        result_text = tr_chat(receiver_chat_id, result) if result == "claim_offer_canceled" else result
+        result_text = localized_claim_offer_result(receiver_chat_id, result, public_id)
         await query.answer(result_text, show_alert=True)
         try:
             state = "canceled" if result == "claim_offer_canceled" else "expired"
-            await query.edit_message_text(f"⛔ {result_text}\n🆔 Offer ID: {public_id}")
+            await query.edit_message_text(f"⛔ {result_text}\n🆔 {tr_chat(receiver_chat_id, 'offer_id')}: {public_id}")
             set_offer_notification_state(public_id, receiver_chat_id, state)
         except TelegramError:
             pass
@@ -9930,7 +10475,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         receiver_chat_id,
     )
 
-    await query.answer("✅ You got this QR", show_alert=False)
+    await query.answer(tr_chat(receiver_chat_id, "offer_claimed"), show_alert=False)
     # Edit the accepted offer message itself into the QR photo, so the receiver does not get a second QR message.
     for note in offer_notifications(public_id):
         note_chat_id = int(note["receiver_chat_id"])
@@ -9950,7 +10495,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 await context.bot.edit_message_text(
                     chat_id=note_chat_id,
                     message_id=note_message_id,
-                    text=f"⛔ Offer expired. Another receiver already accepted this QR.\n🆔 Offer ID: {public_id}",
+                    text=tr_chat(note_chat_id, "offer_taken_text", offer_id_label=tr_chat(note_chat_id, "offer_id"), public_id=public_id),
                 )
                 set_offer_notification_state(public_id, note_chat_id, "expired")
             await asyncio.sleep(0.02)
@@ -9971,7 +10516,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             receiver_message_id = receiver_msg.message_id
         except TelegramError as exc:
             logger.warning("Could not deliver claimed QR %s to receiver %s: %s", public_id, receiver_chat_id, exc)
-            await query.answer("Claim saved, but QR delivery failed. Ask admin to review.", show_alert=True)
+            await query.answer(tr_chat(receiver_chat_id, "claim_saved_delivery_failed"), show_alert=True)
             return
 
     await edit_sender_offer_caption(
@@ -9984,7 +10529,8 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             public_id,
             tr_chat(int(row["sender_chat_id"]), "sender_offer_accepted"),
             expires_at=str(row["offer_expires_at"] or ""),
-            sender_rate=_dec(row["sender_rate_usdt"]),
+            sender_rate=effective_sender_reserved_display(row),
+            order_row=row,
             chat_id=int(row["sender_chat_id"]),
         ),
         reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
@@ -10006,7 +10552,7 @@ async def cancel_order_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         _action, public_id = (query.data or "").split(":", 1)
     except Exception:
-        await query.answer("Invalid cancel button.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_button"), show_alert=True)
         return
 
     sender_chat_id = query.message.chat.id
@@ -10064,16 +10610,16 @@ async def notify_receiver_button(update: Update, context: ContextTypes.DEFAULT_T
     try:
         _action, public_id = (query.data or "").split(":", 1)
     except Exception:
-        await query.answer("Invalid notify button.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_notify_button"), show_alert=True)
         return
 
     sender_chat_id = query.message.chat.id
     row = get_photo_record(public_id)
     if not row:
-        await query.answer("QR not found.", show_alert=True)
+        await query.answer(tr_chat(sender_chat_id if "sender_chat_id" in locals() else query.message.chat.id, "qr_not_found"), show_alert=True)
         return
     if int(row["sender_chat_id"] or 0) != sender_chat_id:
-        await query.answer("Only the QR sender can notify the receiver.", show_alert=True)
+        await query.answer(tr_chat(sender_chat_id, "only_sender_notify_receiver"), show_alert=True)
         return
 
     status = str(row["status"] or "").lower()
@@ -10081,10 +10627,10 @@ async def notify_receiver_button(update: Update, context: ContextTypes.DEFAULT_T
     receiver_chat_id = int(row["receiver_chat_id"] or 0)
 
     if status != "pending":
-        await query.answer(f"This QR is already marked {status.upper()}.", show_alert=True)
+        await query.answer(tr_chat(sender_chat_id, "qr_already_marked", status=status.upper()), show_alert=True)
         return
     if offer_state != "claimed" or receiver_chat_id <= 0:
-        await query.answer("No receiver has accepted this QR yet.", show_alert=True)
+        await query.answer(tr_chat(sender_chat_id, "no_receiver_accepted"), show_alert=True)
         return
     if iso_is_due(row["offer_expires_at"]):
         expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
@@ -10109,7 +10655,7 @@ async def notify_receiver_button(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer(tr_chat(sender_chat_id, "receiver_notified"), show_alert=False)
     except TelegramError as exc:
         logger.warning("Could not notify receiver %s for QR %s: %s", receiver_chat_id, public_id, exc)
-        await query.answer("Could not notify the receiver right now.", show_alert=True)
+        await query.answer(tr_chat(sender_chat_id, "notify_receiver_failed"), show_alert=True)
 
 
 async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10119,19 +10665,19 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     try:
         _action, public_id = (query.data or "").split(":", 1)
     except Exception:
-        await query.answer("Invalid QR button.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_qr_button"), show_alert=True)
         return
     chat_id = query.message.chat.id
     user = get_user_for_chat(chat_id)
     if not can_use_receiver_features(chat_id, user):
-        await query.answer("Only active receivers can open pending QRs.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "only_receivers_open_pending"), show_alert=True)
         return
     row = get_photo_record(public_id)
     if not row or int(row["receiver_chat_id"] or 0) != chat_id:
-        await query.answer("QR not found for your account.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "qr_not_found_for_account"), show_alert=True)
         return
     if str(row["status"]) != "pending" or str(row["offer_state"]) != "claimed":
-        await query.answer("This QR is no longer pending.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "qr_no_longer_pending"), show_alert=True)
         return
     if iso_is_due(row["offer_expires_at"]):
         expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
@@ -10157,7 +10703,7 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer(tr_chat(chat_id, "qr_opened_below"))
     except TelegramError as exc:
         logger.warning("Could not reopen pending QR %s for %s: %s", public_id, chat_id, exc)
-        await query.answer("Could not open that QR right now.", show_alert=True)
+        await query.answer(tr_chat(chat_id, "qr_open_failed"), show_alert=True)
 
 
 async def button_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10166,13 +10712,14 @@ async def button_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     try:
-        action, public_id = query.data.split(":", 1)
+        raw_action, public_id = query.data.split(":", 1)
     except Exception:
-        await query.answer("Invalid button.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_button"), show_alert=True)
         return
 
+    action = normalize_status_callback_action(raw_action)
     if action not in {"done", "failed"}:
-        await query.answer("Invalid action.", show_alert=True)
+        await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_action"), show_alert=True)
         return
 
     chat_id = query.message.chat.id
@@ -10183,7 +10730,7 @@ async def button_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             public_id=public_id,
         )
         if error or not photo:
-            await query.answer(error or "I could not find that QR.", show_alert=True)
+            await query.answer(error or tr_chat(chat_id, "qr_not_found_generic"), show_alert=True)
             return
         FAIL_REASON_FLOW.pop(chat_id, None)
         await query.answer(tr_chat(chat_id, "select_failure_reason_alert"), show_alert=False)
@@ -10270,7 +10817,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
 
 
 async def expire_offer_runtime(bot, public_id: str, row: sqlite3.Row, reason_text: str = "Offer expired. No receiver accepted in time.") -> None:
-    release_sender_reserve(int(row["sender_chat_id"]), _dec(row["sender_rate_usdt"]), public_id, reason_text)
+    release_sender_reserve(int(row["sender_chat_id"]), effective_sender_charge_amount(row, use_current_setting_if_missing=True), public_id, reason_text)
     await notify_qr_expired_by_timeout(bot, public_id, row)
 
 
@@ -10450,17 +10997,17 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
     sent = failed = 0
     status_line = "✅ DONE" if new_status == "done" else "❌ FAILED"
     sender_lines = [
-        "🛠 QR order status changed by admin",
-        f"🆔 Order ID: {public_id}",
-        f"Status: {old_status.upper()} → {status_line}",
+        tr_chat(sender_chat_id, "admin_order_status_changed"),
+        f"🆔 {tr_chat(sender_chat_id, 'order_id_label')}: {public_id}",
+        tr_chat(sender_chat_id, "status_change_line", old_status=old_status.upper(), new_status=status_line),
     ]
     if sender_effect == "refunded":
-        sender_lines.append(f"💳 ${_money(abs(sender_amount))} USDT has been added back to your wallet balance.")
+        sender_lines.append(tr_chat(sender_chat_id, "sender_wallet_refunded", amount=_money(abs(sender_amount))))
     elif sender_effect == "reserve_released":
-        sender_lines.append(f"💳 ${_money(abs(sender_amount))} USDT reserve has been released back to your available balance.")
+        sender_lines.append(tr_chat(sender_chat_id, "sender_reserve_released", amount=_money(abs(sender_amount))))
     elif sender_effect == "charged":
-        sender_lines.append(f"💳 ${_money(abs(sender_amount))} USDT has been deducted from your wallet balance.")
-    sender_lines.append("Use /wallet to view your balance.")
+        sender_lines.append(tr_chat(sender_chat_id, "sender_wallet_charged", amount=_money(abs(sender_amount))))
+    sender_lines.append(tr_chat(sender_chat_id, "use_wallet_balance"))
     try:
         await bot.send_message(chat_id=sender_chat_id, text="\n".join(sender_lines), protect_content=PROTECT_CONTENT)
         sent += 1
@@ -10470,17 +11017,17 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
 
     if receiver_chat_id:
         receiver_lines = [
-            "🛠 QR order status changed by admin",
-            f"🆔 Order ID: {public_id}",
-            f"Status: {old_status.upper()} → {status_line}",
+            tr_chat(receiver_chat_id, "admin_order_status_changed"),
+            f"🆔 {tr_chat(receiver_chat_id, 'order_id_label')}: {public_id}",
+            tr_chat(receiver_chat_id, "status_change_line", old_status=old_status.upper(), new_status=status_line),
         ]
         if receiver_effect == "deducted":
-            receiver_lines.append(f"💰 ${_money(abs(receiver_amount))} USDT has been deducted from your earnings for this order.")
+            receiver_lines.append(tr_chat(receiver_chat_id, "receiver_earnings_deducted", amount=_money(abs(receiver_amount))))
         elif receiver_effect == "credited":
-            receiver_lines.append(f"💰 ${_money(abs(receiver_amount))} USDT has been credited to your earnings for this order.")
+            receiver_lines.append(tr_chat(receiver_chat_id, "receiver_earnings_credited", amount=_money(abs(receiver_amount))))
         else:
-            receiver_lines.append("No receiver earnings change was needed for this order.")
-        receiver_lines.append("Use /earnings to view your balance.")
+            receiver_lines.append(tr_chat(receiver_chat_id, "receiver_earnings_no_change"))
+        receiver_lines.append(tr_chat(receiver_chat_id, "use_earnings_balance"))
         try:
             await bot.send_message(chat_id=receiver_chat_id, text="\n".join(receiver_lines), protect_content=PROTECT_CONTENT)
             sent += 1
@@ -10716,7 +11263,7 @@ async def maintenance_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     message = "🛠 Bot is under maintenance. Please try again later or contact support."
     if update.callback_query:
         try:
-            await update.callback_query.answer("Bot is under maintenance.", show_alert=True)
+            await update.callback_query.answer(tr_chat(update.callback_query.message.chat.id if update.callback_query.message else update.callback_query.from_user.id, "maintenance_on_alert"), show_alert=True)
             if update.callback_query.message:
                 await update.callback_query.edit_message_text(message)
         except TelegramError:
@@ -11657,6 +12204,7 @@ async def admin_qr_detail(request: Request, public_id: str):
           <p><strong>Sender:</strong><br>{sender_html}</p>
           <p><strong>Receiver:</strong><br>{receiver_html}</p>
           <p><strong>Sender rate:</strong> ${_money(row["sender_rate_usdt"])} USDT</p>
+          <p><strong>Order charge / reserved snapshot:</strong> ${_money(effective_sender_charge_amount(row, use_current_setting_if_missing=True))} USDT</p>
           <p><strong>Receiver rate:</strong> ${_money(row["receiver_rate_usdt"])} USDT</p>
           <p><strong>Reserved:</strong> ${_money(row["reserved_usdt"])} USDT</p>
         </div>
@@ -12053,10 +12601,12 @@ async def admin_user_stats(request: Request, chat_id: int):
         balance = _dec(wallet["balance_usdt"])
         reserved = _dec(wallet["reserved_usdt"])
         available = max(Decimal("0"), balance - reserved)
+        lifetime_used = sender_lifetime_balance_used(chat_id)
         balance_cards = f'''
           <div><b>${_money(balance)}</b><span>Total balance</span></div>
           <div><b>${_money(reserved)}</b><span>Reserved</span></div>
           <div><b>${_money(available)}</b><span>Available</span></div>
+          <div><b>${_money(lifetime_used)}</b><span>Lifetime balance used</span></div>
         '''
         action_options = '<option value="add">Add balance</option><option value="remove">Remove balance</option>'
         adjust_title = "Adjust sender wallet"
@@ -12241,7 +12791,7 @@ async def admin_pending(request: Request):
             receiver_id = int(r['receiver_chat_id'] or 0)
             receiver = get_admin_user_row(receiver_id) if receiver_id else None
             receiver_html = user_link(receiver) if receiver else '<span class="muted">Unclaimed</span>'
-            rates = f"Sender ${_money(r['sender_rate_usdt'])}<br>Receiver ${_money(r['receiver_rate_usdt'])}"
+            rates = f"Sender ${_money(effective_sender_charge_amount(r, use_current_setting_if_missing=True))}<br>Receiver ${_money(r['receiver_rate_usdt'])}"
             state = esc(str(r["offer_state"] or "pending").replace("_", " ").title())
             status_html = f'{status_pill(r["status"])}<br><span class="muted small">{state}</span>'
             expire_form = (
@@ -12348,7 +12898,7 @@ async def admin_marketplace_receiver(request: Request):
     if online:
         set_receiver_online(receiver_chat_id, limit)
         notify_key = "notify_receiver_online"
-        notify_kwargs = {"limit": limit}
+        notify_kwargs = {"capacity": total_marketplace_capacity()}
         notify_text = "receiver online"
     else:
         set_receiver_offline(receiver_chat_id)
@@ -13018,11 +13568,7 @@ async def admin_payout_paid(request: Request, request_id: int):
             try:
                 await telegram_application.bot.send_message(
                     chat_id=int(row['receiver_chat_id']),
-                    text=(
-                        "✅ Payout done.\n"
-                        f"Amount: ${_money(row['amount_usdt'])} USDT\n\n"
-                        "Your earnings balance has been updated. Use /earnings to view it."
-                    ),
+                    text=tr_chat(int(row['receiver_chat_id']), "payout_done", amount=_money(row['amount_usdt'])),
                     protect_content=PROTECT_CONTENT,
                 )
             except TelegramError:
@@ -13042,11 +13588,7 @@ async def admin_payout_reject(request: Request, request_id: int):
         try:
             await telegram_application.bot.send_message(
                 chat_id=int(row['receiver_chat_id']),
-                text=(
-                    "❌ Your payout request was rejected.\n"
-                    f"Amount: ${_money(row['amount_usdt'])} USDT\n\n"
-                    "The amount is available again in /earnings."
-                ),
+                text=tr_chat(int(row['receiver_chat_id']), "payout_rejected", amount=_money(row['amount_usdt'])),
                 protect_content=PROTECT_CONTENT,
             )
         except TelegramError:
@@ -14244,7 +14786,7 @@ def build_application() -> Application:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, wallet_text_flow))
     app.add_handler(CallbackQueryHandler(claim_offer_button, pattern=r"^claim:"))
     app.add_handler(CallbackQueryHandler(pending_qr_button, pattern=r"^pendingqr:"))
-    app.add_handler(CallbackQueryHandler(button_status, pattern=r"^(done|failed):"))
+    app.add_handler(CallbackQueryHandler(button_status, pattern=r"^(done|failed|✅\s*(Done|Selesai|Hoàn tất|完成|Completado|Hecho)|❌\s*(Failed|Gagal|Thất bại|失败|Fallido)|Selesai|Gagal|Hoàn tất|Thất bại|完成|失败|Completado|Fallido|Hecho):"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.IMAGE, reject_document))
     app.add_error_handler(error_handler)
