@@ -111,10 +111,10 @@ ADMIN_PANEL_USERNAME=admin
 ADMIN_PANEL_PASSWORD=make-a-strong-password
 ADMIN_SESSION_SECRET=make-a-long-random-secret
 BOT_TZ=Asia/Kolkata
-STORAGE_BACKEND=mongodb
-MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
+STORAGE_BACKEND=auto
+MONGO_URI=
 MONGO_DB_NAME=upi_autopay_bot
-DB_PATH=/tmp/upi_autopay_bot.db
+DB_PATH=upi_autopay_bot.db
 MODE=polling
 PORT=8080
 ```
@@ -151,7 +151,7 @@ BINANCE_RECV_WINDOW_MS=5000
 
 ## MongoDB live deployment
 
-This build is MongoDB-ready for live deployment. Set `MONGO_URI` and the bot will restore/sync its database snapshot through MongoDB automatically. You do **not** need a Railway Volume or any persistent disk.
+This build is MongoDB-ready for live deployment. With `STORAGE_BACKEND=auto`, setting `MONGO_URI` makes MongoDB the primary persistent store; leaving `MONGO_URI` empty uses a normal local SQLite database for testing. You do **not** need a Railway Volume or any persistent disk when MongoDB is configured.
 
 Recommended production variables:
 
@@ -178,7 +178,8 @@ How it works:
 For local-only testing without MongoDB, use:
 
 ```env
-STORAGE_BACKEND=sqlite
+STORAGE_BACKEND=auto
+MONGO_URI=
 DB_PATH=upi_autopay_bot.db
 ```
 

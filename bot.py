@@ -100,11 +100,16 @@ ADMIN_COOKIE_NAME = "upi_autopay_admin_session"
 BOT_TZ = os.getenv("BOT_TZ", "Asia/Kolkata").strip() or "Asia/Kolkata"
 
 # Storage
-# Default remains SQLite for local testing. For live deployment, set MONGO_URI and the bot
-# automatically uses MongoDB-backed persistence without needing a Railway/Render volume.
+# Default is auto: use MongoDB-backed persistence when MONGO_URI/MONGODB_URI is set,
+# otherwise use the local SQLite file for testing.
 MONGO_URI = (os.getenv("MONGO_URI", "").strip() or os.getenv("MONGODB_URI", "").strip())
-STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "mongodb" if MONGO_URI else "sqlite").strip().lower()
-MONGO_ENABLED = STORAGE_BACKEND in {"mongo", "mongodb"}
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "auto").strip().lower() or "auto"
+if STORAGE_BACKEND in {"auto", "default"}:
+    MONGO_ENABLED = bool(MONGO_URI)
+elif STORAGE_BACKEND in {"mongo", "mongodb"}:
+    MONGO_ENABLED = True
+else:
+    MONGO_ENABLED = False
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "").strip() or "upi_autopay_bot"
 MONGO_STATE_COLLECTION = os.getenv("MONGO_STATE_COLLECTION", "bot_state").strip() or "bot_state"
 MONGO_SNAPSHOT_ID = os.getenv("MONGO_SNAPSHOT_ID", "upi_autopay_main").strip() or "upi_autopay_main"
@@ -235,6 +240,7 @@ _mongo_sync_lock = threading.RLock()
 _mongo_restored_once = False
 _mongo_last_synced_fingerprint: tuple[int, int] | None = None
 _mongo_sync_in_progress = False
+_admin_poll_tables_ready = False
 
 
 def _mongo_configured() -> bool:
@@ -1604,6 +1610,28 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, de
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _migrate_admin_poll_tables(conn: sqlite3.Connection) -> None:
+    _add_column_if_missing(conn, "admin_polls", "language", f"TEXT NOT NULL DEFAULT '{DEFAULT_LANGUAGE}'")
+    _add_column_if_missing(conn, "admin_polls", "target_role", "TEXT NOT NULL DEFAULT 'sender'")
+    _add_column_if_missing(conn, "admin_polls", "question", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "admin_polls", "options_json", "TEXT NOT NULL DEFAULT '[]'")
+    _add_column_if_missing(conn, "admin_polls", "created_at", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "admin_polls", "expires_at", "TEXT")
+    _add_column_if_missing(conn, "admin_polls", "closed_at", "TEXT")
+    _add_column_if_missing(conn, "admin_polls", "multi_select", "INTEGER NOT NULL DEFAULT 0")
+
+    _add_column_if_missing(conn, "admin_poll_deliveries", "poll_id", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "admin_poll_deliveries", "chat_id", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "admin_poll_deliveries", "delivered_message_id", "INTEGER")
+    _add_column_if_missing(conn, "admin_poll_deliveries", "created_at", "TEXT NOT NULL DEFAULT ''")
+
+    _add_column_if_missing(conn, "admin_poll_answers", "poll_id", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "admin_poll_answers", "chat_id", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "admin_poll_answers", "option_index", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "admin_poll_answers", "selected_options_json", "TEXT")
+    _add_column_if_missing(conn, "admin_poll_answers", "answered_at", "TEXT NOT NULL DEFAULT ''")
+
+
 def _migrate_db(conn: sqlite3.Connection) -> None:
     # Keep older SQLite databases compatible with the open marketplace version.
     for column, definition in {
@@ -1698,6 +1726,48 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
             )
     except Exception:
         logger.exception("Could not backfill dispute chat messages")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_polls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            language TEXT NOT NULL,
+            target_role TEXT NOT NULL CHECK(target_role IN ('sender','receiver')),
+            question TEXT NOT NULL,
+            options_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_poll_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            poll_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            delivered_message_id INTEGER,
+            created_at TEXT NOT NULL,
+            UNIQUE(poll_id, chat_id),
+            FOREIGN KEY(poll_id) REFERENCES admin_polls(id) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_poll_answers (
+            poll_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            option_index INTEGER NOT NULL,
+            answered_at TEXT NOT NULL,
+            PRIMARY KEY(poll_id, chat_id),
+            FOREIGN KEY(poll_id) REFERENCES admin_polls(id) ON DELETE CASCADE
+        )
+        """
+    )
+    _migrate_admin_poll_tables(conn)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_polls_created ON admin_polls(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_poll_answers_poll ON admin_poll_answers(poll_id, answered_at)")
 
     conn.execute(
         """
@@ -2074,6 +2144,35 @@ def init_db() -> None:
                 FOREIGN KEY(dispute_id) REFERENCES disputes(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS admin_polls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                language TEXT NOT NULL,
+                target_role TEXT NOT NULL CHECK(target_role IN ('sender','receiver')),
+                question TEXT NOT NULL,
+                options_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_poll_deliveries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                poll_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                delivered_message_id INTEGER,
+                created_at TEXT NOT NULL,
+                UNIQUE(poll_id, chat_id),
+                FOREIGN KEY(poll_id) REFERENCES admin_polls(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_poll_answers (
+                poll_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                option_index INTEGER NOT NULL,
+                answered_at TEXT NOT NULL,
+                PRIMARY KEY(poll_id, chat_id),
+                FOREIGN KEY(poll_id) REFERENCES admin_polls(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_photos_date ON photos(date);
             CREATE INDEX IF NOT EXISTS idx_photos_receiver_status ON photos(receiver_chat_id, status);
             CREATE INDEX IF NOT EXISTS idx_photos_sender_status ON photos(sender_chat_id, status);
@@ -2091,6 +2190,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_payout_requests_status ON payout_requests(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_disputes_status ON disputes(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_dispute_messages_dispute ON dispute_messages(dispute_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_admin_polls_created ON admin_polls(created_at);
+            CREATE INDEX IF NOT EXISTS idx_admin_poll_answers_poll ON admin_poll_answers(poll_id, answered_at);
             """
         )
         _migrate_db(conn)
@@ -3682,6 +3783,261 @@ def users_for_language_broadcast(language: str = "all", role: str = "all", limit
             """,
             [DEFAULT_LANGUAGE] + params,
         ).fetchall()
+
+
+def ensure_admin_poll_tables() -> None:
+    global _admin_poll_tables_ready
+    if _admin_poll_tables_ready:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_polls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                language TEXT NOT NULL,
+                target_role TEXT NOT NULL CHECK(target_role IN ('sender','receiver')),
+                question TEXT NOT NULL,
+                options_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_poll_deliveries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                poll_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                delivered_message_id INTEGER,
+                created_at TEXT NOT NULL,
+                UNIQUE(poll_id, chat_id),
+                FOREIGN KEY(poll_id) REFERENCES admin_polls(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_poll_answers (
+                poll_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                option_index INTEGER NOT NULL,
+                answered_at TEXT NOT NULL,
+                PRIMARY KEY(poll_id, chat_id),
+                FOREIGN KEY(poll_id) REFERENCES admin_polls(id) ON DELETE CASCADE
+            )
+            """
+        )
+        _migrate_admin_poll_tables(conn)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_polls_created ON admin_polls(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_admin_poll_answers_poll ON admin_poll_answers(poll_id, answered_at)")
+    _admin_poll_tables_ready = True
+
+
+def create_admin_poll(language: str, target_role: str, question: str, options: list[str], expires_at: str | None, multi_select: bool = False) -> int:
+    ensure_admin_poll_tables()
+    language = normalize_language_code(language)
+    target_role = "receiver" if str(target_role).strip().lower() == "receiver" else "sender"
+    clean_options = [str(option or "").strip() for option in options if str(option or "").strip()]
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO admin_polls(language, target_role, question, options_json, created_at, expires_at, multi_select)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (language, target_role, question.strip(), json.dumps(clean_options, ensure_ascii=False), now_iso(), expires_at, 1 if multi_select else 0),
+        )
+        return int(cur.lastrowid)
+
+
+def record_admin_poll_delivery(poll_id: int, chat_id: int, delivered_message_id: int | None) -> None:
+    ensure_admin_poll_tables()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO admin_poll_deliveries(poll_id, chat_id, delivered_message_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (int(poll_id), int(chat_id), delivered_message_id, now_iso()),
+        )
+
+
+def get_admin_poll(poll_id: int) -> sqlite3.Row | None:
+    ensure_admin_poll_tables()
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM admin_polls WHERE id = ?", (int(poll_id),)).fetchone()
+
+
+def list_admin_polls(limit: int = 50) -> list[sqlite3.Row]:
+    ensure_admin_poll_tables()
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT p.*,
+                   COUNT(DISTINCT d.chat_id) AS delivered_count,
+                   COUNT(a.chat_id) AS answer_count
+            FROM admin_polls p
+            LEFT JOIN admin_poll_deliveries d ON d.poll_id = p.id
+            LEFT JOIN admin_poll_answers a ON a.poll_id = p.id
+            GROUP BY p.id
+            ORDER BY p.created_at DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit or 50)),),
+        ).fetchall()
+
+
+def admin_poll_options(row: sqlite3.Row | None) -> list[str]:
+    if not row:
+        return []
+    try:
+        values = json.loads(str(row["options_json"] or "[]"))
+        if isinstance(values, list):
+            return [str(value) for value in values]
+    except Exception:
+        pass
+    return []
+
+
+def admin_poll_is_expired(row: sqlite3.Row) -> bool:
+    expires_at = row["expires_at"] if "expires_at" in row.keys() else None
+    expires_dt = parse_bot_datetime(expires_at)
+    return bool(expires_dt and now_dt() >= expires_dt)
+
+
+def admin_poll_is_closed(row: sqlite3.Row) -> bool:
+    return bool((row["closed_at"] if "closed_at" in row.keys() else None) or admin_poll_is_expired(row))
+
+
+def admin_poll_selected_options(poll_id: int, chat_id: int) -> list[int]:
+    ensure_admin_poll_tables()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT option_index, selected_options_json FROM admin_poll_answers WHERE poll_id = ? AND chat_id = ?",
+            (int(poll_id), int(chat_id)),
+        ).fetchone()
+    if not row:
+        return []
+    raw = row["selected_options_json"] if "selected_options_json" in row.keys() else None
+    if raw:
+        try:
+            values = json.loads(str(raw))
+            if isinstance(values, list):
+                return sorted({int(v) for v in values})
+        except Exception:
+            pass
+    return [int(row["option_index"])]
+
+
+def save_admin_poll_answer(poll_id: int, chat_id: int, option_index: int) -> tuple[bool, str, sqlite3.Row | None, str | None, list[int]]:
+    ensure_admin_poll_tables()
+    poll = get_admin_poll(poll_id)
+    if not poll:
+        return False, "not_found", None, None, []
+    if admin_poll_is_closed(poll):
+        return False, "closed", poll, None, admin_poll_selected_options(poll_id, chat_id)
+    options = admin_poll_options(poll)
+    if option_index < 0 or option_index >= len(options):
+        return False, "invalid_option", poll, None, admin_poll_selected_options(poll_id, chat_id)
+    multi_select = bool(int(poll["multi_select"] if "multi_select" in poll.keys() else 0))
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT option_index, selected_options_json FROM admin_poll_answers WHERE poll_id = ? AND chat_id = ?",
+            (int(poll_id), int(chat_id)),
+        ).fetchone()
+        if existing and not multi_select:
+            selected = admin_poll_selected_options(poll_id, chat_id)
+            selected_text = options[selected[0]] if selected and selected[0] < len(options) else None
+            return False, "already_answered", poll, selected_text, selected
+        selected = []
+        if existing:
+            raw = existing["selected_options_json"] if "selected_options_json" in existing.keys() else None
+            if raw:
+                try:
+                    parsed = json.loads(str(raw))
+                    if isinstance(parsed, list):
+                        selected = [int(v) for v in parsed]
+                except Exception:
+                    selected = []
+            if not selected:
+                selected = [int(existing["option_index"])]
+        if multi_select:
+            selected_set = set(selected)
+            if int(option_index) in selected_set:
+                selected_set.remove(int(option_index))
+            else:
+                selected_set.add(int(option_index))
+            selected = sorted(selected_set)
+            option_index_for_row = selected[0] if selected else int(option_index)
+            conn.execute(
+                """
+                INSERT INTO admin_poll_answers(poll_id, chat_id, option_index, selected_options_json, answered_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(poll_id, chat_id) DO UPDATE SET
+                    option_index = excluded.option_index,
+                    selected_options_json = excluded.selected_options_json,
+                    answered_at = excluded.answered_at
+                """,
+                (int(poll_id), int(chat_id), option_index_for_row, json.dumps(selected), now_iso()),
+            )
+        else:
+            selected = [int(option_index)]
+            conn.execute(
+                """
+                INSERT INTO admin_poll_answers(poll_id, chat_id, option_index, selected_options_json, answered_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(poll_id), int(chat_id), int(option_index), json.dumps(selected), now_iso()),
+            )
+    answer_text = ", ".join(options[i] for i in selected if 0 <= i < len(options))
+    if not answer_text:
+        answer_text = "No options selected" if multi_select else options[option_index]
+    return True, "saved", poll, answer_text, selected
+
+
+def admin_poll_results(poll_id: int) -> list[sqlite3.Row]:
+    ensure_admin_poll_tables()
+    with get_conn() as conn:
+        rows = conn.execute("SELECT option_index, selected_options_json FROM admin_poll_answers WHERE poll_id = ?", (int(poll_id),)).fetchall()
+    counts: dict[int, int] = {}
+    for row in rows:
+        selected: list[int] = []
+        raw = row["selected_options_json"] if "selected_options_json" in row.keys() else None
+        if raw:
+            try:
+                parsed = json.loads(str(raw))
+                if isinstance(parsed, list):
+                    selected = [int(v) for v in parsed]
+            except Exception:
+                selected = []
+        if not selected:
+            selected = [int(row["option_index"])]
+        for index in set(selected):
+            counts[index] = counts.get(index, 0) + 1
+    return [dict(option_index=index, n=count) for index, count in sorted(counts.items())]
+
+
+def admin_poll_keyboard(poll_id: int, options: list[str], selected: list[int] | None = None, closed: bool = False) -> InlineKeyboardMarkup:
+    selected_set = set(selected or [])
+    rows = []
+    for index, option in enumerate(options[:10]):
+        label = str(option)
+        if len(label) > 48:
+            label = label[:45].rstrip() + "..."
+        prefix = "✓ " if index in selected_set else ""
+        callback = f"adminpoll_closed:{int(poll_id)}" if closed else f"adminpoll:{int(poll_id)}:{index}"
+        rows.append([InlineKeyboardButton(prefix + label, callback_data=callback)])
+    return InlineKeyboardMarkup(rows)
+
+
+def close_admin_poll(poll_id: int) -> bool:
+    ensure_admin_poll_tables()
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE admin_polls SET closed_at = COALESCE(closed_at, ?) WHERE id = ?",
+            (now_iso(), int(poll_id)),
+        )
+    return bool(cur.rowcount)
 
 
 def set_receiver_online(chat_id: int, limit_total: int) -> None:
@@ -8121,6 +8477,81 @@ async def preset_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer(tr_chat(chat_id, "reply_sent"), show_alert=False)
 
 
+async def admin_poll_answer_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    chat_id = query.message.chat.id
+    data = query.data or ""
+    try:
+        _prefix, poll_raw, option_raw = data.split(":", 2)
+        poll_id = int(poll_raw)
+        option_index = int(option_raw)
+    except Exception:
+        await query.answer("Invalid poll button.", show_alert=True)
+        return
+
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
+        await query.answer(tr_chat(chat_id, "not_registered"), show_alert=True)
+        return
+
+    saved, reason, poll, answer_text, selected = save_admin_poll_answer(poll_id, chat_id, option_index)
+    if not saved:
+        if reason == "closed":
+            await query.answer("This poll has ended.", show_alert=True)
+            if poll:
+                try:
+                    await query.edit_message_reply_markup(
+                        reply_markup=admin_poll_keyboard(
+                            int(poll["id"]),
+                            admin_poll_options(poll),
+                            selected=selected,
+                            closed=True,
+                        )
+                    )
+                except TelegramError:
+                    pass
+        elif reason == "already_answered":
+            if poll:
+                try:
+                    await query.edit_message_reply_markup(
+                        reply_markup=admin_poll_keyboard(
+                            int(poll["id"]),
+                            admin_poll_options(poll),
+                            selected=selected,
+                            closed=False,
+                        )
+                    )
+                except TelegramError:
+                    pass
+            await query.answer(f"You already selected: {answer_text}", show_alert=True)
+        else:
+            await query.answer("This poll is no longer available.", show_alert=True)
+        return
+
+    try:
+        await query.edit_message_reply_markup(
+            reply_markup=admin_poll_keyboard(
+                poll_id,
+                admin_poll_options(poll),
+                selected=selected,
+                closed=False,
+            )
+        )
+    except TelegramError:
+        pass
+    await query.answer("Selection saved.", show_alert=False)
+    if poll and answer_text is not None:
+        await notify_admins_poll_answer(poll, chat_id, answer_text)
+
+
+async def admin_poll_closed_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query:
+        await query.answer("This poll has ended.", show_alert=True)
+
+
 # -----------------------------
 # Sender / receiver flow
 # -----------------------------
@@ -11828,6 +12259,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           <a href="/admin/payouts">💸 Payout Requests <span class="nav-count">{pending_payout_count()}</span></a>
           <a href="/admin/disputes">⚠️ Disputes <span class="nav-count">{pending_dispute_count()}</span></a>
           <a href="/admin/broadcast">📣 Broadcast</a>
+          <a href="/admin/polls">🗳️ Polls</a>
           <a href="/admin/messages">💬 Preset Messages</a>
           <a href="/admin/stats">📊 Stats</a>
           <a href="/admin/pending">⏳ Pending QR</a>
@@ -14089,13 +14521,12 @@ def admin_broadcast_form_html(action: str = "/admin/broadcast") -> str:
         native = meta.get("native") or meta["name"]
         count = int(lang_counts.get(code, 0) or 0)
         placeholder = f"Write the {label} broadcast message..."
-        hint = f"{label} users receive this text. Leave empty to skip {label} users during combined send."
+        hint = f"{label} users receive this text. Leave empty to skip {label} users."
         language_cards.append(f'''
           <div class="broadcast-language-card">
             <label>{esc(label)} message <span class="muted small">({esc(count)} user(s))</span></label>
             <textarea name="message_{esc(code)}" placeholder="{esc(placeholder)}" style="min-height:180px;"></textarea>
             <p class="muted">{esc(hint)}</p>
-            <button type="submit" name="broadcast_action" value="language:{esc(code)}">Send {esc(native)} only</button>
           </div>
         ''')
 
@@ -14104,13 +14535,15 @@ def admin_broadcast_form_html(action: str = "/admin/broadcast") -> str:
       <p class="muted">{count_line}</p>
       <p class="muted small">Each language receives only the text written in its own box. Messages are sent exactly as typed and are not auto-translated.</p>
       <form method="post" action="{esc(action)}">
-        <input type="hidden" name="role" value="all">
         <div class="row">
           {''.join(language_cards)}
         </div>
-        <button type="submit" name="broadcast_action" value="combined" style="width:100%; margin-top:8px;">📣 Send combined broadcast</button>
+        <div class="button-row" style="margin-top:8px;">
+          <button type="submit" name="broadcast_action" value="senders">Send to senders only</button>
+          <button type="submit" name="broadcast_action" value="receivers">Send to receivers only</button>
+        </div>
       </form>
-      <p class="muted small">Combined broadcast sends only to languages where the message box is not empty. Users who never selected a language are treated as English/default.</p>
+      <p class="muted small">Send buttons deliver every non-empty language box to that role. Empty language boxes are skipped. Admin IDs are included in sender and receiver targets.</p>
     </div>
     '''
 
@@ -14138,6 +14571,415 @@ def admin_broadcast_counts_html() -> str:
     '''
 
 
+def admin_polls_form_html(action: str = "/admin/polls") -> str:
+    language_cards = []
+    for code, meta in SUPPORTED_LANGUAGES.items():
+        label = "English/default" if code == DEFAULT_LANGUAGE else meta["name"]
+        placeholder = f"Write the {label} poll question..."
+        language_cards.append(f'''
+          <div class="broadcast-language-card poll-language-card" data-poll-lang="{esc(code)}">
+            <label>{esc(label)} poll question</label>
+            <textarea name="poll_question_{esc(code)}" placeholder="{esc(placeholder)}" style="min-height:120px;"></textarea>
+            <div class="poll-options" data-poll-options="{esc(code)}" data-next-index="3">
+              <div class="poll-option-row" data-option-row>
+                <label>Option 1</label>
+                <div class="poll-option-control">
+                  <input name="poll_option_{esc(code)}_1" placeholder="Yes">
+                  <button class="secondary poll-add-option" type="button" data-lang="{esc(code)}" title="Add another option">+</button>
+                  <button class="secondary poll-remove-option" type="button" title="Remove this option" hidden disabled>×</button>
+                </div>
+              </div>
+              <div class="poll-option-row" data-option-row>
+                <label>Option 2</label>
+                <div class="poll-option-control">
+                  <input name="poll_option_{esc(code)}_2" placeholder="No">
+                  <button class="secondary poll-add-option" type="button" data-lang="{esc(code)}" title="Add another option">+</button>
+                  <button class="secondary poll-remove-option" type="button" title="Remove this option" hidden disabled>×</button>
+                </div>
+              </div>
+            </div>
+            <p class="muted">Leave this question blank to skip {esc(label)} users.</p>
+          </div>
+        ''')
+    return f'''
+    <div class="card"><h2>🗳️ Polls</h2>
+      <p class="muted small">Each language has its own question and answer options. Empty language sections are skipped. Admin IDs receive sender and receiver polls.</p>
+      <form method="post" action="{esc(action)}">
+        <div class="row">
+          <div><label>Poll valid for hours</label><input type="number" name="timer_hours" min="0" step="1" value="24" placeholder="24"></div>
+        </div>
+        <div class="row">
+          {''.join(language_cards)}
+        </div>
+        <div class="button-row" style="margin-top:8px;">
+          <button type="submit" name="poll_action" value="senders">Send poll to senders</button>
+          <button type="submit" name="poll_action" value="receivers">Send poll to receivers</button>
+        </div>
+      </form>
+      <style>
+        .poll-options{display:flex;flex-direction:column;gap:10px}
+        .poll-option-row{display:block}
+        .poll-option-control{display:grid;grid-template-columns:minmax(0,1fr) 38px 38px;gap:8px;align-items:center}
+        .poll-option-control input{width:100%}
+        .poll-option-control button{width:38px;height:38px;padding:0;text-align:center}
+      </style>
+      <script>
+      document.addEventListener('DOMContentLoaded', function() {{
+        function bindRow(row) {{
+          const add = row.querySelector('.poll-add-option');
+          const remove = row.querySelector('.poll-remove-option');
+          if (add && !add.dataset.bound) {{
+            add.dataset.bound = '1';
+            add.addEventListener('click', function() {{
+              const lang = add.getAttribute('data-lang');
+              const holder = row.closest('[data-poll-options]');
+              if (!holder) return;
+              let index = parseInt(holder.getAttribute('data-next-index') || '3', 10);
+              if (index > 10) return;
+              const nextRow = document.createElement('div');
+              nextRow.className = 'poll-option-row extra-poll-option-row';
+              nextRow.setAttribute('data-option-row', '');
+              nextRow.innerHTML =
+                '<label>Option ' + index + '</label>' +
+                '<div class="poll-option-control">' +
+                '<input name="poll_option_' + lang + '_' + index + '" placeholder="Optional">' +
+                '<button class="secondary poll-add-option" type="button" data-lang="' + lang + '" title="Add another option">+</button>' +
+                '<button class="secondary poll-remove-option" type="button" title="Remove this option">×</button>' +
+                '</div>';
+              row.insertAdjacentElement('afterend', nextRow);
+              holder.setAttribute('data-next-index', String(index + 1));
+              bindRow(nextRow);
+              const input = nextRow.querySelector('input');
+              if (input) input.focus();
+            }});
+          }}
+          if (remove && !remove.dataset.bound) {{
+            remove.dataset.bound = '1';
+            remove.addEventListener('click', function() {{
+              if (!remove.disabled) row.remove();
+            }});
+          }}
+        }}
+        document.querySelectorAll('[data-option-row]').forEach(bindRow);
+      }});
+      </script>
+    </div>
+    '''
+"""
+          button.addEventListener('click', function() {{
+            const lang = button.getAttribute('data-lang');
+            const holder = document.querySelector('[data-poll-options="' + lang + '"]');
+            if (!holder) return;
+            let index = parseInt(holder.getAttribute('data-next-index') || '3', 10);
+            if (index > 10) return;
+            const row = document.createElement('div');
+            row.className = 'row poll-option-row extra-poll-option-row';
+            row.innerHTML =
+              '<div><label>➕ Option ' + index + '</label><input name="poll_option_' + lang + '_' + index + '" placeholder="Optional"></div>' +
+              '<div class="poll-remove-cell"><label>&nbsp;</label><button class="secondary poll-remove-option" type="button" title="Remove this option">×</button></div>';
+            holder.appendChild(row);
+            holder.setAttribute('data-next-index', String(index + 1));
+            const input = row.querySelector('input');
+            if (input) input.focus();
+            const remove = row.querySelector('.poll-remove-option');
+            if (remove) remove.addEventListener('click', function() {{ row.remove(); }});
+          }});
+        }});
+      }});
+      </script>
+    </div>
+    '''
+"""
+
+
+def admin_polls_results_html() -> str:
+    polls = list_admin_polls(limit=25)
+    if not polls:
+        return '<div class="card"><h3>📊 Recent polls</h3><p>No polls have been sent yet.</p></div>'
+    rows = []
+    for poll in polls:
+        options = admin_poll_options(poll)
+        counts = {int(row["option_index"]): int(row["n"] or 0) for row in admin_poll_results(int(poll["id"]))}
+        result_bits = []
+        for index, option in enumerate(options):
+            result_bits.append(f"{esc(option)}: {esc(counts.get(index, 0))}")
+        language = normalize_language_code(poll["language"])
+        language_label = "English/default" if language == DEFAULT_LANGUAGE else SUPPORTED_LANGUAGES[language]["name"]
+        status = "Expired" if admin_poll_is_expired(poll) else "Open"
+        expires = display_datetime(poll["expires_at"]) if poll["expires_at"] else "No timer"
+        rows.append(
+            f"<tr><td>#{esc(poll['id'])}</td><td>{esc(language_label)}</td><td>{esc(poll['target_role'])}</td>"
+            f"<td>{esc(poll['question'])}</td><td>{esc(int(poll['delivered_count'] or 0))}</td>"
+            f"<td>{esc(int(poll['answer_count'] or 0))}</td><td>{'; '.join(result_bits) or 'No options'}</td>"
+            f"<td>{esc(status)}<br><span class=\"muted small\">Until: {esc(expires)}</span></td></tr>"
+        )
+    return f'''
+    <div class="card"><h3>📊 Recent polls</h3>
+      <div class="table-wrap"><table>
+        <tr><th>ID</th><th>Language</th><th>Target</th><th>Question</th><th>Sent</th><th>Answers</th><th>Results</th><th>Status</th></tr>
+        {''.join(rows)}
+      </table></div>
+    </div>
+    '''
+
+
+def admin_polls_form_html(action: str = "/admin/polls") -> str:
+    language_cards = []
+    for code, meta in SUPPORTED_LANGUAGES.items():
+        label = "English/default" if code == DEFAULT_LANGUAGE else meta["name"]
+        placeholder = f"Write the {label} poll question..."
+        language_cards.append(f'''
+          <div class="broadcast-language-card poll-language-card" data-poll-lang="{esc(code)}">
+            <label>{esc(label)} poll question</label>
+            <textarea name="poll_question_{esc(code)}" placeholder="{esc(placeholder)}" style="min-height:120px;"></textarea>
+            <div class="poll-options" data-poll-options="{esc(code)}">
+              <div class="poll-option-row" data-option-row>
+                <label>Option 1</label>
+                <div class="poll-option-control">
+                  <input name="poll_option_{esc(code)}_1" placeholder="Yes">
+                  <button class="secondary poll-add-option" type="button" data-lang="{esc(code)}" title="Add option below">+</button>
+                  <button class="secondary poll-remove-option invisible" type="button" title="Remove this option" disabled>&times;</button>
+                </div>
+              </div>
+              <div class="poll-option-row" data-option-row>
+                <label>Option 2</label>
+                <div class="poll-option-control">
+                  <input name="poll_option_{esc(code)}_2" placeholder="No">
+                  <button class="secondary poll-add-option" type="button" data-lang="{esc(code)}" title="Add option below">+</button>
+                  <button class="secondary poll-remove-option invisible" type="button" title="Remove this option" disabled>&times;</button>
+                </div>
+              </div>
+            </div>
+            <p class="muted">Leave this question blank to skip {esc(label)} users.</p>
+          </div>
+        ''')
+    return f'''
+    <div class="card"><h2>🗳️ Polls</h2>
+      <p class="muted small">Each language has its own question and answer options. Empty language sections are skipped. Admin IDs receive sender and receiver polls.</p>
+      <form class="polls-form" method="post" action="{esc(action)}">
+        <div class="row">
+          <div><label>Poll valid for hours</label><input type="number" name="timer_hours" min="0" step="1" value="24" placeholder="24"></div>
+          <div><label>Poll type</label><select name="multi_select"><option value="0">Single option</option><option value="1">Multiple options</option></select></div>
+        </div>
+        <div class="row">
+          {''.join(language_cards)}
+        </div>
+        <div class="button-row" style="margin-top:8px;">
+          <button type="submit" name="poll_action" value="senders">Send poll to senders</button>
+          <button type="submit" name="poll_action" value="receivers">Send poll to receivers</button>
+        </div>
+      </form>
+      <style>
+        .poll-options{{display:flex;flex-direction:column;gap:10px}}
+        .poll-option-row{{display:block}}
+        .poll-option-control{{display:grid;grid-template-columns:minmax(0,1fr) 38px 38px;gap:8px;align-items:center}}
+        .poll-option-control input{{width:100%}}
+        .poll-option-control button{{width:38px;height:38px;padding:0;text-align:center}}
+        .poll-option-control .invisible{{visibility:hidden}}
+      </style>
+      <script>
+      document.addEventListener('DOMContentLoaded', function() {{
+        function renumber(holder) {{
+          const lang = holder.getAttribute('data-poll-options');
+          holder.querySelectorAll('[data-option-row]').forEach(function(row, idx) {{
+            const number = idx + 1;
+            const label = row.querySelector('label');
+            const input = row.querySelector('input');
+            if (label) label.textContent = 'Option ' + number;
+            if (input) input.name = 'poll_option_' + lang + '_' + number;
+          }});
+        }}
+        function bindRow(row) {{
+          const add = row.querySelector('.poll-add-option');
+          const remove = row.querySelector('.poll-remove-option');
+          if (add && !add.dataset.bound) {{
+            add.dataset.bound = '1';
+            add.addEventListener('click', function() {{
+              const lang = add.getAttribute('data-lang');
+              const holder = row.closest('[data-poll-options]');
+              if (!holder || holder.querySelectorAll('[data-option-row]').length >= 10) return;
+              const nextRow = document.createElement('div');
+              nextRow.className = 'poll-option-row extra-poll-option-row';
+              nextRow.setAttribute('data-option-row', '');
+              nextRow.innerHTML =
+                '<label>Option</label>' +
+                '<div class="poll-option-control">' +
+                '<input name="poll_option_' + lang + '_new" placeholder="Optional">' +
+                '<button class="secondary poll-add-option" type="button" data-lang="' + lang + '" title="Add option below">+</button>' +
+                '<button class="secondary poll-remove-option" type="button" title="Remove this option">&times;</button>' +
+                '</div>';
+              row.insertAdjacentElement('afterend', nextRow);
+              bindRow(nextRow);
+              renumber(holder);
+              const input = nextRow.querySelector('input');
+              if (input) input.focus();
+            }});
+          }}
+          if (remove && !remove.dataset.bound) {{
+            remove.dataset.bound = '1';
+            remove.addEventListener('click', function() {{
+              if (remove.disabled) return;
+              const holder = row.closest('[data-poll-options]');
+              row.remove();
+              if (holder) renumber(holder);
+            }});
+          }}
+        }}
+        document.querySelectorAll('[data-option-row]').forEach(bindRow);
+        document.querySelectorAll('.polls-form').forEach(function(form) {{
+          form.addEventListener('submit', function() {{
+            form.querySelectorAll('[data-poll-options]').forEach(renumber);
+          }});
+        }});
+      }});
+      </script>
+    </div>
+    '''
+
+
+def admin_polls_results_html() -> str:
+    polls = list_admin_polls(limit=25)
+    if not polls:
+        return '<div class="card"><h3>Recent polls</h3><p>No polls have been sent yet.</p></div>'
+    rows = []
+    for poll in polls:
+        options = admin_poll_options(poll)
+        counts = {int(row["option_index"]): int(row["n"] or 0) for row in admin_poll_results(int(poll["id"]))}
+        result_bits = []
+        for index, option in enumerate(options):
+            result_bits.append(f"{esc(option)}: {esc(counts.get(index, 0))}")
+        language = normalize_language_code(poll["language"])
+        language_label = "English/default" if language == DEFAULT_LANGUAGE else SUPPORTED_LANGUAGES[language]["name"]
+        is_closed = bool(poll["closed_at"] if "closed_at" in poll.keys() else None)
+        status = "Closed" if is_closed else ("Expired" if admin_poll_is_expired(poll) else "Open")
+        expires = display_datetime(poll["expires_at"]) if poll["expires_at"] else "No timer"
+        poll_type = "Multiple" if int(poll["multi_select"] if "multi_select" in poll.keys() else 0) else "Single"
+        close_form = ""
+        if status == "Open":
+            close_form = (
+                f'<form class="inline" method="post" action="/admin/polls/{int(poll["id"])}/close" '
+                'data-confirm-title="Close poll?" data-confirm-button="Close poll" data-confirm-class="danger" '
+                'data-confirm-message="Users will no longer be able to answer this poll.">'
+                '<button class="danger" type="submit">Close</button></form>'
+            )
+        rows.append(
+            f"<tr><td>#{esc(poll['id'])}</td><td>{esc(language_label)}</td><td>{esc(poll['target_role'])}</td>"
+            f"<td>{esc(poll_type)}</td><td>{esc(poll['question'])}</td><td>{esc(int(poll['delivered_count'] or 0))}</td>"
+            f"<td>{esc(int(poll['answer_count'] or 0))}</td><td>{'; '.join(result_bits) or 'No options'}</td>"
+            f"<td>{esc(status)}<br><span class=\"muted small\">Until: {esc(expires)}</span></td><td>{close_form}</td></tr>"
+        )
+    return f'''
+    <div class="card"><h3>Recent polls</h3>
+      <div class="table-wrap"><table>
+        <tr><th>ID</th><th>Language</th><th>Target</th><th>Type</th><th>Question</th><th>Sent</th><th>Answers</th><th>Results</th><th>Status</th><th>Action</th></tr>
+        {''.join(rows)}
+      </table></div>
+    </div>
+    '''
+
+
+async def notify_admins_poll_answer(poll: sqlite3.Row, chat_id: int, answer_text: str) -> None:
+    if telegram_application is None:
+        return
+    user = get_admin_user_row(int(chat_id))
+    user_text = strip_tags(user_link(user)) if user else str(chat_id)
+    language = normalize_language_code(poll["language"])
+    language_label = "English/default" if language == DEFAULT_LANGUAGE else SUPPORTED_LANGUAGES[language]["name"]
+    text = (
+        f"Poll answer received\n"
+        f"Poll ID: #{int(poll['id'])}\n"
+        f"Target: {poll['target_role']}\n"
+        f"Language: {language_label}\n"
+        f"User: {user_text}\n\n"
+        f"Question: {poll['question']}\n"
+        f"Answer: {answer_text}"
+    )
+    for admin_id in sorted(ADMIN_IDS):
+        try:
+            await telegram_application.bot.send_message(chat_id=admin_id, text=text, protect_content=PROTECT_CONTENT)
+            await asyncio.sleep(0.03)
+        except TelegramError:
+            pass
+
+
+async def send_admin_polls_from_form(form, redirect_path: str) -> RedirectResponse:
+    if telegram_application is None:
+        return redirect_with_msg(redirect_path, "Bot is not ready; could not send polls.")
+    try:
+        ensure_admin_poll_tables()
+        action = str(form.get("poll_action", "")).strip().lower()
+        if action not in {"senders", "receivers"}:
+            return redirect_with_msg(redirect_path, "Choose whether to send the poll to senders or receivers.")
+        target_role = "sender" if action == "senders" else "receiver"
+        multi_select = str(form.get("multi_select", "0")).strip().lower() in {"1", "true", "yes", "on", "multi", "multiple"}
+        try:
+            timer_hours = max(0, int(str(form.get("timer_hours", "0")).strip() or "0"))
+        except ValueError:
+            return redirect_with_msg(redirect_path, "Poll timer must be a whole number of hours.")
+        expires_at = None
+        if timer_hours > 0:
+            expires_at = (now_dt().timestamp() + timer_hours * 3600)
+            expires_at = datetime.fromtimestamp(expires_at, ZoneInfo(BOT_TZ)).isoformat(timespec="seconds")
+
+        poll_specs: list[tuple[str, str, list[str]]] = []
+        for code in SUPPORTED_LANGUAGES:
+            question = str(form.get(f"poll_question_{code}", "")).strip()
+            if not question:
+                continue
+            if len(question) > 280:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[code]['name']} poll question is too long. Keep it under 280 characters.")
+            option_values: list[tuple[int, str]] = []
+            for key, value in form.multi_items():
+                key_text = str(key)
+                prefix = f"poll_option_{code}_"
+                if not key_text.startswith(prefix):
+                    continue
+                try:
+                    option_index = int(key_text[len(prefix):])
+                except ValueError:
+                    continue
+                option_text = str(value or "").strip()
+                if option_text:
+                    option_values.append((option_index, option_text))
+            options = [option for _index, option in sorted(option_values, key=lambda item: item[0])]
+            if len(options) < 2:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[code]['name']} poll needs at least two answer options.")
+            poll_specs.append((code, question, options[:10]))
+        if not poll_specs:
+            return redirect_with_msg(redirect_path, "Enter at least one poll question before sending.")
+
+        total_sent = total_failed = total_targeted = 0
+        parts = []
+        for code, question, options in poll_specs:
+            poll_id = create_admin_poll(code, target_role, question, options, expires_at, multi_select=multi_select)
+            recipients = users_for_language_broadcast(code, target_role)
+            sent = failed = 0
+            for row in recipients:
+                chat_id = int(row["chat_id"])
+                try:
+                    msg = await telegram_application.bot.send_message(
+                        chat_id=chat_id,
+                        text=question,
+                        reply_markup=admin_poll_keyboard(poll_id, options),
+                        protect_content=PROTECT_CONTENT,
+                    )
+                    record_admin_poll_delivery(poll_id, chat_id, msg.message_id)
+                    sent += 1
+                    await asyncio.sleep(0.03)
+                except TelegramError:
+                    failed += 1
+            total_sent += sent
+            total_failed += failed
+            total_targeted += len(recipients)
+            label = "English/default" if code == DEFAULT_LANGUAGE else SUPPORTED_LANGUAGES[code]["name"]
+            parts.append(f"{label}: {sent}/{len(recipients)} sent, {failed} failed")
+        details = "; ".join(parts)
+        return redirect_with_msg(redirect_path, f"Poll sent to {target_role}s. Total sent: {total_sent}/{total_targeted}. Failed: {total_failed}. {details}")
+    except Exception as exc:
+        logger.exception("Could not send admin poll")
+        return redirect_with_msg(redirect_path, f"Could not send poll: {exc}")
+
+
 async def send_admin_language_broadcast_from_form(form, redirect_path: str) -> RedirectResponse:
     role = str(form.get("role", "all")).strip().lower() or "all"
     if role not in {"all", "sender", "receiver", "admin"}:
@@ -14157,6 +14999,33 @@ async def send_admin_language_broadcast_from_form(form, redirect_path: str) -> R
 
     action = str(form.get("broadcast_action", "")).strip().lower()
     has_language_boxes = any(f"message_{code}" in form for code in SUPPORTED_LANGUAGES)
+
+    if action in {"senders", "receivers"} and has_language_boxes:
+        if telegram_application is None:
+            return redirect_with_msg(redirect_path, "Bot is not ready; could not send broadcast.")
+        role = "sender" if action == "senders" else "receiver"
+        language_messages: list[tuple[str, str]] = []
+        for code in SUPPORTED_LANGUAGES:
+            message_text = str(form.get(f"message_{code}", "")).strip()
+            if not message_text:
+                continue
+            if len(message_text) > 3900:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[code]['name']} broadcast message is too long. Keep it under 3900 characters.")
+            language_messages.append((code, message_text))
+        if not language_messages:
+            return redirect_with_msg(redirect_path, "Enter at least one language message before sending broadcast.")
+
+        total_sent = total_failed = total_targeted = 0
+        parts = []
+        for code, message_text in language_messages:
+            sent, failed, targeted = await deliver_to_language(code, message_text)
+            total_sent += sent
+            total_failed += failed
+            total_targeted += targeted
+            label = "English/default" if code == DEFAULT_LANGUAGE else SUPPORTED_LANGUAGES[code]["name"]
+            parts.append(f"{label}: {sent}/{targeted} sent, {failed} failed")
+        details = "; ".join(parts)
+        return redirect_with_msg(redirect_path, f"Broadcast sent to {role}s. Total sent: {total_sent}/{total_targeted}. Failed: {total_failed}. {details}")
 
     # New multi-language broadcast panel:
     # - each language button sends only that language's box;
@@ -14254,6 +15123,33 @@ async def admin_broadcast_send(request: Request):
         return guard
     form = await request.form()
     return await send_admin_language_broadcast_from_form(form, "/admin/broadcast")
+
+
+@web_app.get("/admin/polls", response_class=HTMLResponse)
+async def admin_polls_page(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    body = admin_polls_form_html("/admin/polls") + admin_polls_results_html()
+    return render_page("Polls", body, request)
+
+
+@web_app.post("/admin/polls")
+async def admin_polls_send(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    return await send_admin_polls_from_form(form, "/admin/polls")
+
+
+@web_app.post("/admin/polls/{poll_id}/close")
+async def admin_polls_close(request: Request, poll_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    ok = close_admin_poll(poll_id)
+    return redirect_with_msg("/admin/polls", "Poll closed." if ok else "Poll not found.")
 
 
 @web_app.get("/admin/messages", response_class=HTMLResponse)
@@ -14971,6 +15867,8 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(wallet_history_button, pattern=r"^wallet_history:"))
     app.add_handler(CallbackQueryHandler(qr_history_button, pattern=r"^qr_history:"))
     app.add_handler(CallbackQueryHandler(withdraw_button, pattern=r"^withdraw:"))
+    app.add_handler(CallbackQueryHandler(admin_poll_closed_button, pattern=r"^adminpoll_closed:"))
+    app.add_handler(CallbackQueryHandler(admin_poll_answer_button, pattern=r"^adminpoll:"))
     app.add_handler(CallbackQueryHandler(preset_send_button, pattern=r"^msgsend:"))
     app.add_handler(CallbackQueryHandler(preset_reply_button, pattern=r"^msgreply:"))
     app.add_handler(CallbackQueryHandler(fail_reason_button, pattern=r"^failreason:"))
