@@ -1636,6 +1636,7 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "payment_deposits", column, definition)
 
     _add_column_if_missing(conn, "payout_requests", "payout_details", "TEXT")
+    _add_column_if_missing(conn, "payout_requests", "resolved_at", "TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS receiver_payout_details (
@@ -1805,6 +1806,7 @@ def _legacy_pre_migrate_before_schema(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "photos", "failure_reason", "TEXT")
     if "payout_requests" in tables:
         _add_column_if_missing(conn, "payout_requests", "payout_details", "TEXT")
+        _add_column_if_missing(conn, "payout_requests", "resolved_at", "TEXT")
 
 
 def init_db() -> None:
@@ -13596,22 +13598,86 @@ async def admin_payout_paid(request: Request, request_id: int):
     guard = admin_guard(request)
     if guard:
         return guard
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM payout_requests WHERE id = ?", (request_id,)).fetchone()
-    if row and row['status'] == 'pending':
-        manual_adjust_wallet(int(row['receiver_chat_id']), _dec(row['amount_usdt']), 'receiver_paid', f'Payout request #{request_id} paid')
+
+    notify_chat_id: int | None = None
+    notify_amount: Decimal | None = None
+    msg = "Payout marked paid."
+    ledger_note = f"Payout request #{request_id} paid"
+
+    try:
         with get_conn() as conn:
-            conn.execute("UPDATE payout_requests SET status = 'paid', resolved_at = ? WHERE id = ?", (now_iso(), request_id))
-        if telegram_application is not None:
-            try:
-                await telegram_application.bot.send_message(
-                    chat_id=int(row['receiver_chat_id']),
-                    text=tr_chat(int(row['receiver_chat_id']), "payout_done", amount=_money(row['amount_usdt'])),
-                    protect_content=PROTECT_CONTENT,
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM payout_requests WHERE id = ?", (request_id,)).fetchone()
+            if not row:
+                conn.rollback()
+                return redirect_with_msg("/admin/payouts", "Payout request not found.")
+            if str(row["status"]) != "pending":
+                conn.rollback()
+                return redirect_with_msg("/admin/payouts", "Payout was already processed.")
+
+            receiver_chat_id = int(row["receiver_chat_id"])
+            amount = _dec(row["amount_usdt"])
+            wallet = _wallet_snapshot(conn, receiver_chat_id)
+            new_paid = _dec(wallet["paid_usdt"]) + amount
+            earned = _dec(wallet["earned_usdt"])
+
+            already_adjusted = conn.execute(
+                """
+                SELECT id FROM wallet_ledger
+                WHERE chat_id = ? AND kind = 'manual_receiver_paid' AND note = ?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (receiver_chat_id, ledger_note),
+            ).fetchone()
+
+            if _usdt_gt(new_paid, earned):
+                # If an older deployment crashed after updating paid_usdt but before
+                # setting payout_requests.status='paid', the ledger row proves the
+                # wallet was already adjusted. Repair the payout status instead of
+                # charging the receiver twice.
+                if already_adjusted:
+                    conn.execute("UPDATE payout_requests SET status = 'paid', resolved_at = ? WHERE id = ?", (now_iso(), request_id))
+                    conn.commit()
+                    notify_chat_id = receiver_chat_id
+                    notify_amount = amount
+                    msg = "Payout status repaired and marked paid."
+                else:
+                    conn.rollback()
+                    return redirect_with_msg(
+                        "/admin/payouts",
+                        f"Could not mark payout paid: receiver paid amount would exceed earned amount (${_money(earned)} USDT).",
+                    )
+            else:
+                now = now_iso()
+                conn.execute(
+                    "UPDATE wallets SET paid_usdt = ?, updated_at = ? WHERE chat_id = ?",
+                    (float(new_paid), now, receiver_chat_id),
                 )
-            except TelegramError:
-                pass
-    return redirect_with_msg("/admin/payouts", "Payout marked paid.")
+                updated = conn.execute("SELECT * FROM wallets WHERE chat_id = ?", (receiver_chat_id,)).fetchone()
+                balance_after = float(_dec(updated["earned_usdt"]) - _dec(updated["paid_usdt"]))
+                if not already_adjusted:
+                    conn.execute(
+                        "INSERT INTO wallet_ledger(chat_id, kind, amount_usdt, balance_after, note, related_id, created_at) VALUES (?, 'manual_receiver_paid', ?, ?, ?, NULL, ?)",
+                        (receiver_chat_id, float(amount), balance_after, ledger_note, now),
+                    )
+                conn.execute("UPDATE payout_requests SET status = 'paid', resolved_at = ? WHERE id = ?", (now, request_id))
+                conn.commit()
+                notify_chat_id = receiver_chat_id
+                notify_amount = amount
+    except Exception as exc:
+        logger.exception("Could not mark payout request %s paid", request_id)
+        return redirect_with_msg("/admin/payouts", f"Could not mark payout paid: {exc}")
+
+    if telegram_application is not None and notify_chat_id is not None and notify_amount is not None:
+        try:
+            await telegram_application.bot.send_message(
+                chat_id=notify_chat_id,
+                text=tr_chat(notify_chat_id, "payout_done", amount=_money(notify_amount)),
+                protect_content=PROTECT_CONTENT,
+            )
+        except TelegramError:
+            pass
+    return redirect_with_msg("/admin/payouts", msg)
 
 
 @web_app.post("/admin/payouts/{request_id}/reject")
@@ -13994,37 +14060,59 @@ async def admin_dispute_reject(request: Request, dispute_id: int):
 
 
 def admin_broadcast_form_html(action: str = "/admin/broadcast") -> str:
-    language_options = [
-        ("all", "All languages"),
-        ("en", "English"),
-        ("id", "Indonesian / Bahasa Indonesia"),
-        ("vi", "Vietnamese / Tiếng Việt"),
-        ("zh", "Chinese / 中文"),
-        ("es", "Spanish / Español"),
-    ]
-    role_options = [
-        ("all", "All active users"),
-        ("sender", "Senders only"),
-        ("receiver", "Receivers only"),
-        ("admin", "Admins only"),
-    ]
-    lang_html = "".join(f'<option value="{esc(code)}">{esc(label)}</option>' for code, label in language_options)
-    role_html = "".join(f'<option value="{esc(code)}">{esc(label)}</option>' for code, label in role_options)
+    lang_counts: dict[str, int] = {}
+    total_active = 0
+    try:
+        total_active = len(users_for_language_broadcast("all", "all", limit=10000))
+    except Exception:
+        total_active = 0
+    for code in SUPPORTED_LANGUAGES:
+        try:
+            lang_counts[code] = len(users_for_language_broadcast(code, "all", limit=10000))
+        except Exception:
+            lang_counts[code] = 0
+
+    count_bits = []
+    for code, meta in SUPPORTED_LANGUAGES.items():
+        count = int(lang_counts.get(code, 0) or 0)
+        if count <= 0:
+            continue
+        label = "English/default" if code == DEFAULT_LANGUAGE else meta["name"]
+        count_bits.append(f"{esc(label)}: {esc(count)}")
+    count_line = f"Target users: {esc(total_active)} active user(s)."
+    if count_bits:
+        count_line += " " + ", ".join(count_bits) + "."
+
+    language_cards = []
+    for code, meta in SUPPORTED_LANGUAGES.items():
+        label = "English/default" if code == DEFAULT_LANGUAGE else meta["name"]
+        native = meta.get("native") or meta["name"]
+        count = int(lang_counts.get(code, 0) or 0)
+        placeholder = f"Write the {label} broadcast message..."
+        hint = f"{label} users receive this text. Leave empty to skip {label} users during combined send."
+        language_cards.append(f'''
+          <div class="broadcast-language-card">
+            <label>{esc(label)} message <span class="muted small">({esc(count)} user(s))</span></label>
+            <textarea name="message_{esc(code)}" placeholder="{esc(placeholder)}" style="min-height:180px;"></textarea>
+            <p class="muted">{esc(hint)}</p>
+            <button type="submit" name="broadcast_action" value="language:{esc(code)}">Send {esc(native)} only</button>
+          </div>
+        ''')
+
     return f'''
     <div class="card"><h2>📣 Broadcast</h2>
-      <p class="muted">Send an admin-written Telegram message to users by selected bot language. The message is sent exactly as typed and is not auto-translated.</p>
+      <p class="muted">{count_line}</p>
+      <p class="muted small">Each language receives only the text written in its own box. Messages are sent exactly as typed and are not auto-translated.</p>
       <form method="post" action="{esc(action)}">
+        <input type="hidden" name="role" value="all">
         <div class="row">
-          <div><label>Send to language</label><select name="language">{lang_html}</select></div>
-          <div><label>Target users</label><select name="role">{role_html}</select></div>
+          {''.join(language_cards)}
         </div>
-        <label>Broadcast message</label><textarea name="message_text" required placeholder="Write the exact message to send. It will only go to the selected language group."></textarea>
-        <button type="submit">📣 Send broadcast</button>
+        <button type="submit" name="broadcast_action" value="combined" style="width:100%; margin-top:8px;">📣 Send combined broadcast</button>
       </form>
-      <p class="muted small">Users who never selected a language are treated as English. Admin panel text and admin-written messages remain English/unchanged.</p>
+      <p class="muted small">Combined broadcast sends only to languages where the message box is not empty. Users who never selected a language are treated as English/default.</p>
     </div>
     '''
-
 
 def admin_broadcast_counts_html() -> str:
     languages = [("all", "All languages")] + [(code, meta["name"]) for code, meta in SUPPORTED_LANGUAGES.items()]
@@ -14051,10 +14139,81 @@ def admin_broadcast_counts_html() -> str:
 
 
 async def send_admin_language_broadcast_from_form(form, redirect_path: str) -> RedirectResponse:
-    language_raw = str(form.get("language", "all")).strip().lower() or "all"
     role = str(form.get("role", "all")).strip().lower() or "all"
     if role not in {"all", "sender", "receiver", "admin"}:
         role = "all"
+
+    async def deliver_to_language(language: str, message_text: str) -> tuple[int, int, int]:
+        rows = users_for_language_broadcast(language, role)
+        sent = failed = 0
+        for row in rows:
+            try:
+                await telegram_application.bot.send_message(chat_id=int(row["chat_id"]), text=message_text, protect_content=PROTECT_CONTENT)
+                sent += 1
+                await asyncio.sleep(0.03)
+            except TelegramError:
+                failed += 1
+        return sent, failed, len(rows)
+
+    action = str(form.get("broadcast_action", "")).strip().lower()
+    has_language_boxes = any(f"message_{code}" in form for code in SUPPORTED_LANGUAGES)
+
+    # New multi-language broadcast panel:
+    # - each language button sends only that language's box;
+    # - combined sends every non-empty language box to its matching language group.
+    if action.startswith("language:") or action in SUPPORTED_LANGUAGES or action == "combined" or (has_language_boxes and not str(form.get("message_text", "")).strip()):
+        if telegram_application is None:
+            return redirect_with_msg(redirect_path, "Bot is not ready; could not send broadcast.")
+
+        if action.startswith("language:"):
+            language = normalize_language_code(action.split(":", 1)[1])
+            message_text = str(form.get(f"message_{language}", "")).strip()
+            if not message_text:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[language]['name']} broadcast message is required.")
+            if len(message_text) > 3900:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[language]['name']} broadcast message is too long. Keep it under 3900 characters.")
+            sent, failed, total = await deliver_to_language(language, message_text)
+            if total <= 0:
+                return redirect_with_msg(redirect_path, f"No active {role} users found for {SUPPORTED_LANGUAGES[language]['name']}.")
+            return redirect_with_msg(redirect_path, f"Broadcast sent to {sent} {role} users for {SUPPORTED_LANGUAGES[language]['name']}. Failed: {failed}.")
+
+        if action in SUPPORTED_LANGUAGES:
+            language = normalize_language_code(action)
+            message_text = str(form.get(f"message_{language}", "")).strip()
+            if not message_text:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[language]['name']} broadcast message is required.")
+            if len(message_text) > 3900:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[language]['name']} broadcast message is too long. Keep it under 3900 characters.")
+            sent, failed, total = await deliver_to_language(language, message_text)
+            if total <= 0:
+                return redirect_with_msg(redirect_path, f"No active {role} users found for {SUPPORTED_LANGUAGES[language]['name']}.")
+            return redirect_with_msg(redirect_path, f"Broadcast sent to {sent} {role} users for {SUPPORTED_LANGUAGES[language]['name']}. Failed: {failed}.")
+
+        language_messages: list[tuple[str, str]] = []
+        for code in SUPPORTED_LANGUAGES:
+            message_text = str(form.get(f"message_{code}", "")).strip()
+            if not message_text:
+                continue
+            if len(message_text) > 3900:
+                return redirect_with_msg(redirect_path, f"{SUPPORTED_LANGUAGES[code]['name']} broadcast message is too long. Keep it under 3900 characters.")
+            language_messages.append((code, message_text))
+        if not language_messages:
+            return redirect_with_msg(redirect_path, "Enter at least one language message before sending combined broadcast.")
+
+        total_sent = total_failed = total_targeted = 0
+        parts = []
+        for code, message_text in language_messages:
+            sent, failed, targeted = await deliver_to_language(code, message_text)
+            total_sent += sent
+            total_failed += failed
+            total_targeted += targeted
+            label = "English/default" if code == DEFAULT_LANGUAGE else SUPPORTED_LANGUAGES[code]["name"]
+            parts.append(f"{label}: {sent}/{targeted} sent, {failed} failed")
+        details = "; ".join(parts)
+        return redirect_with_msg(redirect_path, f"Combined broadcast completed. Total sent: {total_sent}/{total_targeted}. Failed: {total_failed}. {details}")
+
+    # Backward-compatible single-message form support used by older pages/links.
+    language_raw = str(form.get("language", "all")).strip().lower() or "all"
     language = "all" if language_raw == "all" else normalize_language_code(language_raw)
     message_text = str(form.get("message_text", "")).strip()
     if not message_text:
