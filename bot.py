@@ -2936,6 +2936,21 @@ def _money4(value) -> str:
     return f"{_dec(value):.4f}"
 
 
+# SQLite stores monetary values as REAL in this project. Repeated 0.50/0.10 style
+# additions can come back as values such as 9.999999999 even though the UI correctly
+# displays them as $10.00. Use a tiny tolerance only for eligibility checks so a
+# receiver with a displayed $10.00 balance can withdraw against a $10.00 minimum.
+USDT_COMPARE_EPSILON = Decimal("0.000001")
+
+
+def _usdt_lt(left, right) -> bool:
+    return _dec(left) < (_dec(right) - USDT_COMPARE_EPSILON)
+
+
+def _usdt_gt(left, right) -> bool:
+    return _dec(left) > (_dec(right) + USDT_COMPARE_EPSILON)
+
+
 def _setting_raw(key: str, default: str = "") -> str:
     value = get_admin_setting(key)
     if value is None or value == "":
@@ -9402,6 +9417,7 @@ async def _send_withdraw_amount_prompt(message_or_query, chat_id: int) -> None:
     _wallet, due, requested, available, _paid = receiver_earnings_numbers(chat_id)
     WITHDRAW_FLOW[chat_id] = {"step": "amount"}
     text = tr_chat(chat_id, "withdraw_prompt", available=_money(available), minimum=_money(min_payout))
+    # Receivers must type the withdrawal amount manually. Keep only navigation buttons here.
     markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]])
     if hasattr(message_or_query, "edit_message_text"):
         await message_or_query.edit_message_text(text, reply_markup=markup)
@@ -9449,7 +9465,7 @@ async def _send_withdraw_prompt(message_or_query, chat_id: int) -> None:
     min_payout = _dec(settings["min_payout_usdt"])
     _wallet, _due, _requested, available, _paid = receiver_earnings_numbers(chat_id)
     back_markup = InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_back"), callback_data="nav:wallet")]])
-    if available < min_payout:
+    if _usdt_lt(available, min_payout):
         WITHDRAW_FLOW.pop(chat_id, None)
         text = tr_chat(chat_id, "withdraw_no_available", available=_money(available), minimum=_money(min_payout))
         if hasattr(message_or_query, "edit_message_text"):
@@ -9542,10 +9558,10 @@ async def submit_withdraw_amount(message, chat_id: int, amount: Decimal) -> None
     if amount <= 0:
         await message.reply_text(tr_chat(chat_id, "send_valid_quantity"))
         return
-    if amount < min_payout:
+    if _usdt_lt(amount, min_payout):
         await message.reply_text(tr_chat(chat_id, "minimum_payout", amount=_money(min_payout)))
         return
-    if amount > available:
+    if _usdt_gt(amount, available):
         await message.reply_text(tr_chat(chat_id, "withdraw_available_due", available=_money(available), due=_money(due), requested=_money(requested)))
         return
 
@@ -9570,9 +9586,9 @@ async def submit_withdraw_request(message_or_query, chat_id: int, amount: Decima
     _wallet, due, requested, available, _paid = receiver_earnings_numbers(chat_id)
     if amount <= 0:
         text = "Send a valid quantity."
-    elif amount < min_payout:
+    elif _usdt_lt(amount, min_payout):
         text = tr_chat(chat_id, "minimum_payout", amount=_money(min_payout))
-    elif amount > available:
+    elif _usdt_gt(amount, available):
         text = f"Available: ${_money(available)} USDT\nDue: ${_money(due)} USDT · Requested: ${_money(requested)} USDT"
     else:
         text = ""
