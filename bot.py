@@ -99,6 +99,14 @@ ADMIN_COOKIE_SECURE = os.getenv("ADMIN_COOKIE_SECURE", "false").strip().lower() 
 ADMIN_COOKIE_NAME = "upi_autopay_admin_session"
 BOT_TZ = os.getenv("BOT_TZ", "Asia/Kolkata").strip() or "Asia/Kolkata"
 
+# Token Fetcher ZIP delivery. Admin can save the Telegram file_id by replying
+# to the ZIP/document with /settokenfetcher, or you can set TOKENFETCHER_FILE_ID
+# directly in .env/Railway variables. Senders use /tokenfetcher to receive it.
+TOKENFETCHER_FILE_ID = os.getenv("TOKENFETCHER_FILE_ID", "").strip()
+TOKENFETCHER_FILENAME = os.getenv("TOKENFETCHER_FILENAME", "token_fetcher.zip").strip() or "token_fetcher.zip"
+TOKENFETCHER_FILE_ID_SETTING = "tokenfetcher_file_id"
+TOKENFETCHER_FILENAME_SETTING = "tokenfetcher_filename"
+
 # Storage
 # Default is auto: use MongoDB-backed persistence when MONGO_URI/MONGODB_URI is set,
 # otherwise use the local SQLite file for testing.
@@ -1589,6 +1597,25 @@ for _code, _items in _SEND_METHOD_TRANSLATIONS.items():
     _TRANSLATIONS.setdefault(_code, {}).update(_items)
 for _code in SUPPORTED_LANGUAGES:
     for _k, _v in _SEND_METHOD_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
+_TOKENFETCHER_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "cmd_tokenfetcher": "• /tokenfetcher — download the Token Fetcher ZIP",
+        "tokenfetcher_only_senders": "Only active senders can use /tokenfetcher.",
+        "tokenfetcher_not_configured": "Token Fetcher file is not configured yet. Please contact support.",
+        "tokenfetcher_caption": "Token Fetcher ZIP",
+        "tokenfetcher_send_failed": "I could not send the Token Fetcher file right now. Please try again later or contact support.",
+        "settokenfetcher_only_admin": "Only admins can set the Token Fetcher file.",
+        "settokenfetcher_usage": "Send the ZIP/document to this bot, then reply to that file with /settokenfetcher.",
+        "settokenfetcher_saved": "✅ Token Fetcher file saved.\nFile: {filename}\nSenders can now use /tokenfetcher.",
+    },
+}
+for _code, _items in _TOKENFETCHER_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _TOKENFETCHER_TRANSLATIONS["en"].items():
         _TRANSLATIONS[_code].setdefault(_k, _v)
 
 
@@ -8695,6 +8722,7 @@ def commands_help_text(user: UserRow | None = None, chat_id: int | None = None) 
             "",
             tr_chat(chat_id, "commands_sender"),
             tr_chat(chat_id, "cmd_send_qr"),
+            tr_chat(chat_id, "cmd_tokenfetcher"),
             tr_chat(chat_id, "cmd_status"),
             tr_chat(chat_id, "cmd_wallet"),
             tr_chat(chat_id, "cmd_loadwallet"),
@@ -10076,6 +10104,63 @@ async def _send_deposit_payment_message(message, dep: sqlite3.Row, context: Cont
     )
     save_deposit_payment_message(dep["ref_id"], int(sent.chat_id), int(sent.message_id), template)
     schedule_deposit_payment_poll(getattr(context, "application", None) if context else None, str(dep["ref_id"]))
+
+
+def get_tokenfetcher_file_config() -> tuple[str, str]:
+    file_id = (get_admin_setting(TOKENFETCHER_FILE_ID_SETTING) or TOKENFETCHER_FILE_ID or "").strip()
+    filename = (get_admin_setting(TOKENFETCHER_FILENAME_SETTING) or TOKENFETCHER_FILENAME or "token_fetcher.zip").strip()
+    return file_id, filename or "token_fetcher.zip"
+
+
+async def tokenfetcher_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    observe_telegram_profile(update.effective_user)
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text(tr_chat(chat_id, "private_only"))
+        return
+
+    user = get_user(chat_id)
+    if not can_use_sender_features(chat_id, user):
+        await update.message.reply_text(tr_chat(chat_id, "tokenfetcher_only_senders"))
+        return
+
+    file_id, filename = get_tokenfetcher_file_config()
+    if not file_id:
+        await update.message.reply_text(tr_chat(chat_id, "tokenfetcher_not_configured"))
+        return
+
+    try:
+        await update.message.reply_document(
+            document=file_id,
+            filename=filename,
+            caption=tr_chat(chat_id, "tokenfetcher_caption"),
+        )
+    except TelegramError:
+        logger.exception("Could not send Token Fetcher file to %s", chat_id)
+        await update.message.reply_text(tr_chat(chat_id, "tokenfetcher_send_failed"))
+
+
+async def settokenfetcher_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    observe_telegram_profile(update.effective_user)
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    if not is_admin(chat_id):
+        await update.message.reply_text(tr_chat(chat_id, "settokenfetcher_only_admin"))
+        return
+
+    source_message = update.message.reply_to_message or update.message
+    document = getattr(source_message, "document", None)
+    if document is None:
+        await update.message.reply_text(tr_chat(chat_id, "settokenfetcher_usage"))
+        return
+
+    filename = (getattr(document, "file_name", None) or TOKENFETCHER_FILENAME or "token_fetcher.zip").strip()
+    set_admin_setting(TOKENFETCHER_FILE_ID_SETTING, document.file_id)
+    set_admin_setting(TOKENFETCHER_FILENAME_SETTING, filename)
+    await update.message.reply_text(tr_chat(chat_id, "settokenfetcher_saved", filename=filename))
 
 
 async def wallet_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -17595,6 +17680,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
     if role == "sender":
         return common + [
             ("send", "Choose QR or Access Token submission"),
+            ("tokenfetcher", "Download Token Fetcher ZIP"),
             ("status", "Show marketplace capacity"),
             ("wallet", "Show wallet balance"),
             ("loadwallet", "Top-up your wallet"),
@@ -17613,6 +17699,8 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
     if role == "admin":
         return common + [
             ("send", "Choose QR or Access Token submission"),
+            ("tokenfetcher", "Download Token Fetcher ZIP"),
+            ("settokenfetcher", "Admin: save Token Fetcher ZIP"),
             ("status", "Show marketplace capacity"),
             ("wallet", "Show wallet balance"),
             ("loadwallet", "Top-up your wallet"),
@@ -17671,6 +17759,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("status", marketplace_status_cmd))
     app.add_handler(CommandHandler("wallet", wallet_cmd))
     app.add_handler(CommandHandler("send", send_cmd))
+    app.add_handler(CommandHandler("tokenfetcher", tokenfetcher_cmd))
+    app.add_handler(CommandHandler("settokenfetcher", settokenfetcher_cmd))
     app.add_handler(CommandHandler("loadwallet", loadwallet_cmd))
     app.add_handler(CommandHandler("on", on_cmd))
     app.add_handler(CommandHandler("limit", limit_cmd))

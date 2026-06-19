@@ -28,6 +28,7 @@ The Telegram bot is user-only. Admin controls live in the web panel.
 /start
 /myid
 /send
+/tokenfetcher
 /status
 /wallet
 /loadwallet
@@ -37,6 +38,8 @@ The Telegram bot is user-only. Admin controls live in the web panel.
 ```
 
 `/send` opens the submission menu. It shows available methods such as QR and Access Token with the current sender price on each button. Directly sending a QR photo still works as before.
+
+`/tokenfetcher` sends the configured Token Fetcher ZIP to active senders. To set it, an admin sends the ZIP/document to the bot once, then replies to that file with `/settokenfetcher`. You can also set `TOKENFETCHER_FILE_ID` and `TOKENFETCHER_FILENAME` in environment variables.
 
 ### Receiver commands
 
