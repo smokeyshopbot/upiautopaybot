@@ -13965,7 +13965,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           <a href="/admin">🏠 Dashboard</a>
           <a href="/admin/users">👥 Users</a>
           <a href="/admin/marketplace">📡 Marketplace</a>
-          <a href="/admin/access-token-keys">Access Token Keys <span class="nav-count">{available_access_token_key_count()}</span></a>
+          <a href="/admin/access-token-keys">🔑 Access Token Keys <span class="nav-count">{available_access_token_key_count()}</span></a>
           <a href="/admin/payment-reviews">🧾 Pending Payments <span class="nav-count">{pending_payment_review_count()}</span></a>
           <a href="/admin/wallet-deposits">🏦 Wallet Deposits</a>
           <a href="/admin/payments">💳 Payment Settings</a>
