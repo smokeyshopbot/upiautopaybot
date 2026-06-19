@@ -41,6 +41,8 @@ The Telegram bot is user-only. Admin controls live in the web panel.
 
 `/tokenfetcher` sends the configured Token Fetcher ZIP to active senders. To set it, an admin sends the ZIP/document to the bot once, then replies to that file with `/settokenfetcher`. You can also set `TOKENFETCHER_FILE_ID` and `TOKENFETCHER_FILENAME` in environment variables.
 
+Long Access Token orders include a **Copy full Access Token** button for both sender and winning receiver. Set `WEBHOOK_URL` to your public app URL so that button can open the one-tap web copy page for long tokens.
+
 ### Receiver commands
 
 ```text
@@ -116,7 +118,7 @@ Admin features:
 
 - Users: add/disable senders and receivers.
 - Dashboard: maintenance mode toggle plus live stats for pending QR, disputes, payouts, payment reviews, sender balances, and receiver payable totals.
-- Marketplace: sender/receiver rates and receiver online/offline toggles.
+- Marketplace: enable/disable QR and Access Token methods, sender/receiver rates, and receiver online/offline toggles.
 - Wallets: view sender balances and receiver due amounts, plus manual adjustments.
 - Payments: BEP20/Polygon wallet addresses, Binance Pay ID/name, manual TxHash tolerances, minimum wallet top-up, and deposit review.
 - Payout Requests: review receiver withdrawal requests with red sidebar count. Receiver withdrawals are blocked until available balance reaches the admin-set minimum payout amount.
@@ -179,6 +181,8 @@ DEFAULT_SENDER_RATE_USDT=0.50
 DEFAULT_RECEIVER_RATE_USDT=0
 DEFAULT_ACCESS_TOKEN_SENDER_RATE_USDT=0.50
 DEFAULT_ACCESS_TOKEN_RECEIVER_RATE_USDT=0
+QR_METHOD_ENABLED=true
+ACCESS_TOKEN_METHOD_ENABLED=true
 DEFAULT_MIN_PAYOUT_USDT=1
 DEFAULT_MIN_WALLET_TOPUP_USDT=1
 BEP20_MANUAL_TOLERANCE_USDT=0.01

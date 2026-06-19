@@ -48,6 +48,10 @@ import numpy as np
 import qrcode
 from dotenv import load_dotenv
 from telegram import BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
+try:
+    from telegram import CopyTextButton
+except ImportError:  # Older python-telegram-bot fallback; long-token web copy links still work.
+    CopyTextButton = None
 from telegram.constants import ChatType
 from telegram.error import TelegramError
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Header
@@ -217,6 +221,8 @@ DEFAULT_ACCESS_TOKEN_RECEIVER_RATE_USDT = (
     os.getenv("DEFAULT_ACCESS_TOKEN_RECEIVER_RATE_USDT", "").strip()
     or DEFAULT_RECEIVER_RATE_USDT
 )
+DEFAULT_QR_METHOD_ENABLED = os.getenv("QR_METHOD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+DEFAULT_ACCESS_TOKEN_METHOD_ENABLED = os.getenv("ACCESS_TOKEN_METHOD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 ACCESS_TOKEN_KEY_LOW_THRESHOLD = int(os.getenv("ACCESS_TOKEN_KEY_LOW_THRESHOLD", "10"))
 ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS = int(os.getenv("ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS", "3600"))
 OFFER_TIMER_REFRESH_SECONDS = int(os.getenv("OFFER_TIMER_REFRESH_SECONDS", "5"))
@@ -1499,6 +1505,8 @@ _SEND_METHOD_TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "send_choose_method": "Choose what you want to send:",
         "send_invalid_method": "Invalid send method.",
+        "send_method_disabled": "This send method is disabled by admin right now.",
+        "send_no_methods": "No send methods are enabled right now. Please contact admin.",
         "send_qr_prompt": "Send a QR photo now. Send /cancel to abort.",
         "send_access_token_prompt": "Send the Access Token now. Send /cancel to abort.",
         "access_token_too_short": "Access Token is too short. Send at least 2 characters.",
@@ -1561,6 +1569,12 @@ _SEND_METHOD_TRANSLATIONS["en"].update({
     "access_token_scans_available": "Access Token scans available: {count}",
     "access_token_scans_unavailable": "Access Token scans are currently unavailable. Please check back later; you will be notified via the bot once the service is available again.",
     "btn_accept_access_token": "✅ Accept Access Token scan",
+    "btn_copy_access_token": "📋 Copy full Access Token",
+    "copy_access_token_title": "Copy full Access Token",
+    "copy_access_token_status_trying": "Trying to copy the full Access Token...",
+    "copy_access_token_status_copied": "✅ Full Access Token copied.",
+    "copy_access_token_status_manual": "If auto-copy did not work, tap the button below or copy manually from the box.",
+    "copy_access_token_button": "📋 Copy full Access Token",
     "offer_new_access_token": "📥 New Access Token scan available",
     "offer_tap_to_claim_access_token": "Tap Accept Access Token scan to claim it. The Access Token will be sent only if you win the claim.",
     "sender_access_token_offer_accepted": "⏳ Your Access Token offer was accepted. Waiting for receiver update.",
@@ -3367,6 +3381,8 @@ def get_marketplace_settings() -> dict[str, Decimal | int | bool | str]:
         "qr_receiver_rate_usdt": qr_receiver_rate,
         "access_token_sender_rate_usdt": access_token_sender_rate,
         "access_token_receiver_rate_usdt": access_token_receiver_rate,
+        "qr_enabled": setting_bool("qr_enabled", DEFAULT_QR_METHOD_ENABLED),
+        "access_token_enabled": setting_bool("access_token_enabled", DEFAULT_ACCESS_TOKEN_METHOD_ENABLED),
         "qr_expire_minutes": setting_int("qr_expire_minutes", QR_EXPIRE_MINUTES),
         "access_token_expire_minutes": setting_int("access_token_expire_minutes", ACCESS_TOKEN_EXPIRE_MINUTES),
         "payment_timeout_minutes": setting_int("payment_timeout_minutes", PAYMENT_TIMEOUT_MINUTES),
@@ -3407,6 +3423,23 @@ def marketplace_rates_for_payload(payload_type: str, settings: dict[str, Decimal
     if payload_type in {"access_token", "text"}:
         return _dec(settings["access_token_sender_rate_usdt"]), _dec(settings["access_token_receiver_rate_usdt"])
     return _dec(settings["qr_sender_rate_usdt"]), _dec(settings["qr_receiver_rate_usdt"])
+
+
+def send_method_enabled(method: str, settings: dict[str, Decimal | int | bool | str] | None = None) -> bool:
+    settings = settings or get_marketplace_settings()
+    method = str(method or "").strip().lower()
+    if method == "text":
+        method = "access_token"
+    if method == "qr":
+        return bool(settings.get("qr_enabled", True))
+    if method == "access_token":
+        return bool(settings.get("access_token_enabled", True))
+    return False
+
+
+def enabled_send_methods(settings: dict[str, Decimal | int | bool | str] | None = None) -> list[str]:
+    settings = settings or get_marketplace_settings()
+    return [method for method in ("qr", "access_token") if send_method_enabled(method, settings)]
 
 
 def _row_dec(row, key: str, default: Decimal | str | int | float = "0") -> Decimal:
@@ -4405,10 +4438,11 @@ def marketplace_status_text(for_chat_id: int | None = None) -> str:
             rate = _dec(settings["sender_rate_usdt"])
             available = _dec(wallet["balance_usdt"]) - _dec(wallet["reserved_usdt"])
             text += f"\n{tr_chat(for_chat_id, 'marketplace_your_available_balance', amount=_money(available))}\n"
-            if rate > 0:
+            if rate > 0 and send_method_enabled("qr", settings):
                 scans = str(max(0, int(available // rate)))
                 text += f"{tr_chat(for_chat_id, 'marketplace_estimated_scans', scans=scans)}\n"
-            text += f"{tr_chat(for_chat_id, 'access_token_scans_available', count=access_token_scans_available_count())}\n"
+            if send_method_enabled("access_token", settings):
+                text += f"{tr_chat(for_chat_id, 'access_token_scans_available', count=access_token_scans_available_count())}\n"
         elif user and user.role == "receiver":
             presence = receiver_presence_row(for_chat_id)
             if presence and presence["online"]:
@@ -4711,6 +4745,8 @@ def open_access_token_offer_count() -> int:
 
 
 def access_token_scans_available_count() -> int:
+    if not send_method_enabled("access_token"):
+        return 0
     outstanding = open_access_token_offer_count()
     return max(0, min(total_marketplace_capacity(), available_access_token_key_count()) - outstanding)
 
@@ -4900,6 +4936,8 @@ async def notify_admins_low_access_token_keys(bot) -> None:
 
 
 async def notify_access_token_waitlist_if_available(bot) -> tuple[int, int]:
+    if not send_method_enabled("access_token"):
+        return 0, 0
     count = access_token_scans_available_count()
     if count <= 0:
         return 0, 0
@@ -8294,14 +8332,14 @@ def method_label(payload_type: str, chat_id: int | None = None) -> str:
 
 def build_send_method_keyboard(chat_id: int | None = None) -> InlineKeyboardMarkup:
     settings = get_marketplace_settings()
-    qr_sender_rate, _qr_receiver_rate = marketplace_rates_for_payload("qr", settings)
-    access_token_sender_rate, _access_token_receiver_rate = marketplace_rates_for_payload("access_token", settings)
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(f"QR - ${_money(qr_sender_rate)} USDT", callback_data="sendmethod:qr")],
-            [InlineKeyboardButton(f"Access Token - ${_money(access_token_sender_rate)} USDT", callback_data="sendmethod:access_token")],
-        ]
-    )
+    rows: list[list[InlineKeyboardButton]] = []
+    if send_method_enabled("qr", settings):
+        qr_sender_rate, _qr_receiver_rate = marketplace_rates_for_payload("qr", settings)
+        rows.append([InlineKeyboardButton(f"QR - ${_money(qr_sender_rate)} USDT", callback_data="sendmethod:qr")])
+    if send_method_enabled("access_token", settings):
+        access_token_sender_rate, _access_token_receiver_rate = marketplace_rates_for_payload("access_token", settings)
+        rows.append([InlineKeyboardButton(f"Access Token - ${_money(access_token_sender_rate)} USDT", callback_data="sendmethod:access_token")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def edit_order_message(
@@ -8560,6 +8598,45 @@ async def edit_receiver_access_token_order_message(
         )
 
 
+ACCESS_TOKEN_NATIVE_COPY_MAX = 256
+
+
+def _access_token_copy_secret() -> bytes:
+    secret = WEBHOOK_SECRET_TOKEN or BOT_TOKEN or APP_NAME
+    return secret.encode("utf-8")
+
+
+def _access_token_copy_signature(public_id: str, role: str, chat_id: int, token_text: str) -> str:
+    token_hash = hashlib.sha256(str(token_text or "").encode("utf-8")).hexdigest()
+    payload = f"{public_id}:{role}:{int(chat_id)}:{token_hash}".encode("utf-8")
+    return hmac.new(_access_token_copy_secret(), payload, hashlib.sha256).hexdigest()
+
+
+def access_token_copy_url(public_id: str, role: str, chat_id: int | None, token_text: str) -> str:
+    if not WEBHOOK_URL or chat_id is None:
+        return ""
+    role = str(role or "").strip().lower()
+    if role not in {"sender", "receiver"}:
+        return ""
+    sig = _access_token_copy_signature(public_id, role, int(chat_id), token_text)
+    return f"{WEBHOOK_URL}/copy/access-token/{quote(str(public_id), safe='')}/{role}/{int(chat_id)}?sig={sig}"
+
+
+def access_token_copy_button(public_id: str, token_text: str, chat_id: int | None, role: str) -> InlineKeyboardButton | None:
+    token_text = str(token_text or "").strip()
+    if not token_text:
+        return None
+    label = tr_chat(chat_id, "btn_copy_access_token")
+    url = access_token_copy_url(public_id, role, chat_id, token_text)
+    if url:
+        return InlineKeyboardButton(label, url=url)
+    # Telegram's native copy_text button only accepts short text (1-256 chars).
+    # Long Access Tokens keep using the <pre> block copy icon unless WEBHOOK_URL enables the web-copy page above.
+    if CopyTextButton is not None and len(token_text) <= ACCESS_TOKEN_NATIVE_COPY_MAX:
+        return InlineKeyboardButton(label, copy_text=CopyTextButton(text=token_text))
+    return None
+
+
 def receiver_status_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -8571,12 +8648,43 @@ def receiver_status_keyboard(public_id: str, chat_id: int | None = None) -> Inli
     )
 
 
+def receiver_access_token_status_keyboard(public_id: str, token_text: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    copy_button = access_token_copy_button(public_id, token_text, chat_id, "receiver")
+    if copy_button is not None:
+        rows.append([copy_button])
+    rows.append([
+        InlineKeyboardButton(tr_chat(chat_id, "btn_done"), callback_data=f"done:{public_id}"),
+        InlineKeyboardButton(tr_chat(chat_id, "btn_failed"), callback_data=f"failed:{public_id}"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
+
 def qr_dispute_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data=f"disputeqr:{public_id}")],
         ]
     )
+
+
+def access_token_dispute_keyboard(public_id: str, token_text: str, chat_id: int | None = None, role: str = "receiver") -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    copy_button = access_token_copy_button(public_id, token_text, chat_id, role)
+    if copy_button is not None:
+        rows.append([copy_button])
+    rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_dispute"), callback_data=f"disputeqr:{public_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def order_dispute_keyboard(public_id: str, chat_id: int | None = None, row=None, role: str = "receiver") -> InlineKeyboardMarkup:
+    if row is not None and order_payload_type(row) == "access_token":
+        try:
+            token_text = str(row["payload_text"] or "").strip()
+        except Exception:
+            token_text = ""
+        return access_token_dispute_keyboard(public_id, token_text, chat_id, role)
+    return qr_dispute_keyboard(public_id, chat_id)
 
 
 def failure_reason_label_key(reason_key: str, payload_type: str = "qr") -> str:
@@ -8620,12 +8728,30 @@ def sender_open_offer_keyboard(public_id: str, chat_id: int | None = None) -> In
     )
 
 
+def sender_access_token_open_offer_keyboard(public_id: str, token_text: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    copy_button = access_token_copy_button(public_id, token_text, chat_id, "sender")
+    if copy_button is not None:
+        rows.append([copy_button])
+    rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_cancel_open_order"), callback_data=f"cancelorder:{public_id}")])
+    return InlineKeyboardMarkup(rows)
+
+
 def sender_notify_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(tr_chat(chat_id, "btn_notify_receiver"), callback_data=f"notify:{public_id}")],
         ]
     )
+
+
+def sender_access_token_notify_keyboard(public_id: str, token_text: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    copy_button = access_token_copy_button(public_id, token_text, chat_id, "sender")
+    if copy_button is not None:
+        rows.append([copy_button])
+    rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_notify_receiver"), callback_data=f"notify:{public_id}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def split_chunks(lines: list[str], max_len: int = 3500) -> Iterable[str]:
@@ -10574,6 +10700,10 @@ async def send_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not can_use_sender_features(chat_id, user):
         await update.message.reply_text(tr_chat(chat_id, "only_active_sender_photos"))
         return
+    settings = get_marketplace_settings()
+    if not enabled_send_methods(settings):
+        await update.message.reply_text(tr_chat(chat_id, "send_no_methods"))
+        return
     await update.message.reply_text(
         tr_chat(chat_id, "send_choose_method"),
         reply_markup=build_send_method_keyboard(chat_id),
@@ -10594,6 +10724,21 @@ async def send_method_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         method = "access_token"
     if method not in {"qr", "access_token"}:
         await query.answer(tr_chat(chat_id, "send_invalid_method"), show_alert=True)
+        return
+    settings = get_marketplace_settings()
+    if not send_method_enabled(method, settings):
+        SEND_FLOW.pop(chat_id, None)
+        await query.answer(tr_chat(chat_id, "send_method_disabled"), show_alert=True)
+        try:
+            if enabled_send_methods(settings):
+                await query.edit_message_text(
+                    tr_chat(chat_id, "send_choose_method"),
+                    reply_markup=build_send_method_keyboard(chat_id),
+                )
+            else:
+                await query.edit_message_text(tr_chat(chat_id, "send_no_methods"))
+        except TelegramError:
+            pass
         return
     SEND_FLOW[chat_id] = {"method": method}
     await query.answer()
@@ -10631,6 +10776,9 @@ async def create_access_token_offer_from_message(message, context: ContextTypes.
         return
 
     settings = get_marketplace_settings()
+    if not send_method_enabled("access_token", settings):
+        await message.reply_text(tr_chat(chat_id, "send_method_disabled"))
+        return
     if settings["maintenance_mode"]:
         await message.reply_text(tr_chat(chat_id, "maintenance_paused"))
         return
@@ -10729,7 +10877,7 @@ async def create_access_token_offer_from_message(message, context: ContextTypes.
                 sender_rate=sender_rate,
                 chat_id=chat_id,
             ),
-            reply_markup=sender_open_offer_keyboard(public_id, chat_id),
+            reply_markup=sender_access_token_open_offer_keyboard(public_id, payload_text, chat_id),
         )
         schedule_open_offer_timer_refresh_task(context.application, public_id)
     await delete_original_sender_message_safely(context, chat_id, message.message_id)
@@ -11421,7 +11569,7 @@ async def refresh_open_offer_timer_after_delay(application: Application, public_
                         sender_chat_id,
                         sender_message_id,
                         sender_text,
-                        reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
+                        reply_markup=sender_access_token_open_offer_keyboard(public_id, str(row["payload_text"] or "").strip(), sender_chat_id),
                     )
                 else:
                     sender_text = build_sender_offer_caption(
@@ -11503,7 +11651,7 @@ async def refresh_claimed_order_timer_once(bot, public_id: str, row: sqlite3.Row
                 receiver_chat_id,
                 receiver_message_id,
                 build_receiver_access_token_message(row, receiver_chat_id),
-                reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                reply_markup=receiver_access_token_status_keyboard(public_id, str(row["payload_text"] or "").strip(), receiver_chat_id),
             )
         else:
             try:
@@ -11548,7 +11696,7 @@ async def refresh_claimed_order_timer_once(bot, public_id: str, row: sqlite3.Row
                 sender_chat_id,
                 sender_message_id,
                 sender_text,
-                reply_markup=sender_notify_keyboard(public_id, sender_chat_id),
+                reply_markup=sender_access_token_notify_keyboard(public_id, str(row["payload_text"] or "").strip(), sender_chat_id),
             )
         else:
             sender_text = build_sender_offer_caption(
@@ -11816,6 +11964,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         SEND_FLOW.pop(chat.id, None)
 
     settings = get_marketplace_settings()
+    if not send_method_enabled("qr", settings):
+        SEND_FLOW.pop(chat.id, None)
+        await update.message.reply_text(tr_chat(chat.id, "send_method_disabled"))
+        return
     if settings["maintenance_mode"]:
         await update.message.reply_text(tr_chat(chat.id, "maintenance_paused"))
         return
@@ -12034,7 +12186,7 @@ async def complete_photo(
     edit_errors: list[str] = []
 
     if photo.receiver_message_id:
-        receiver_markup = qr_dispute_keyboard(photo.public_id, photo.receiver_chat_id or actor_chat_id)
+        receiver_markup = order_dispute_keyboard(photo.public_id, photo.receiver_chat_id or actor_chat_id, record_after_status, "receiver")
         edited = await edit_order_message(
             bot,
             chat_id=photo.receiver_chat_id,
@@ -12054,7 +12206,7 @@ async def complete_photo(
             edit_errors.append("receiver buttons")
 
     if photo.sender_message_id:
-        sender_markup = qr_dispute_keyboard(photo.public_id, photo.sender_chat_id)
+        sender_markup = order_dispute_keyboard(photo.public_id, photo.sender_chat_id, record_after_status, "sender")
         edited = await edit_order_message(
             bot,
             chat_id=photo.sender_chat_id,
@@ -12301,7 +12453,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         note_chat_id,
                         note_message_id,
                         accepted_text,
-                        reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                        reply_markup=receiver_access_token_status_keyboard(public_id, str(row["payload_text"] or "").strip(), receiver_chat_id),
                     )
                     if not edited_receiver_token:
                         continue
@@ -12334,7 +12486,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     chat_id=receiver_chat_id,
                     text=accepted_text,
                     parse_mode="HTML",
-                    reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                    reply_markup=receiver_access_token_status_keyboard(public_id, str(row["payload_text"] or "").strip(), receiver_chat_id),
                     protect_content=PROTECT_CONTENT,
                 )
             else:
@@ -12371,7 +12523,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             int(row["sender_chat_id"]),
             int(row["sender_message_id"] or 0),
             sender_text,
-            reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
+            reply_markup=sender_access_token_notify_keyboard(public_id, str(row["payload_text"] or "").strip(), int(row["sender_chat_id"])),
         )
     else:
         sender_text = build_sender_offer_caption(
@@ -12391,11 +12543,16 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             sender_text,
             reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
         )
+    sender_markup = (
+        sender_access_token_notify_keyboard(public_id, str(row["payload_text"] or "").strip(), int(row["sender_chat_id"]))
+        if payload_type == "access_token"
+        else sender_notify_keyboard(public_id, int(row["sender_chat_id"]))
+    )
     await edit_order_reply_markup(
         context.bot,
         chat_id=int(row["sender_chat_id"]),
         message_id=int(row["sender_message_id"] or 0),
-        reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
+        reply_markup=sender_markup,
     )
 
     if payload_type == "access_token":
@@ -12569,7 +12726,7 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 chat_id=chat_id,
                 text=build_receiver_access_token_message(row, chat_id),
                 parse_mode="HTML",
-                reply_markup=receiver_status_keyboard(public_id, chat_id),
+                reply_markup=receiver_access_token_status_keyboard(public_id, str(row["payload_text"] or "").strip(), chat_id),
                 protect_content=PROTECT_CONTENT,
             )
         else:
@@ -12670,7 +12827,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
                     chat_id=note_chat_id,
                     message_id=note_message_id,
                     text=expired_caption_for(note_chat_id),
-                    reply_markup=qr_dispute_keyboard(public_id, note_chat_id),
+                    reply_markup=order_dispute_keyboard(public_id, note_chat_id, row, "receiver"),
                 )
             else:
                 await bot.edit_message_text(
@@ -12689,7 +12846,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
             chat_id=claimed_receiver_id,
             message_id=receiver_message_id,
             text=expired_caption_for(claimed_receiver_id),
-            reply_markup=qr_dispute_keyboard(public_id, claimed_receiver_id),
+            reply_markup=order_dispute_keyboard(public_id, claimed_receiver_id, row, "receiver"),
         )
 
     try:
@@ -12700,7 +12857,7 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
                 chat_id=sender_chat_id,
                 message_id=int(row["sender_message_id"]),
                 text=expired_caption_for(sender_chat_id),
-                reply_markup=qr_dispute_keyboard(public_id, sender_chat_id),
+                reply_markup=order_dispute_keyboard(public_id, sender_chat_id, row, "sender"),
             )
     except TelegramError:
         pass
@@ -12786,7 +12943,7 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
                 chat_id=sender_id,
                 message_id=int(row["sender_message_id"]),
                 text=expired_admin_caption_for(sender_id),
-                reply_markup=qr_dispute_keyboard(public_id, sender_id),
+                reply_markup=order_dispute_keyboard(public_id, sender_id, row, "sender"),
             )
     except TelegramError:
         pass
@@ -12799,7 +12956,7 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
                 chat_id=receiver_id,
                 message_id=int(row["receiver_message_id"]),
                 text=expired_admin_caption_for(receiver_id),
-                reply_markup=qr_dispute_keyboard(public_id, receiver_id),
+                reply_markup=order_dispute_keyboard(public_id, receiver_id, row, "receiver"),
             )
     except TelegramError:
         pass
@@ -12892,7 +13049,7 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
             chat_id=chat_id,
             message_id=message_id,
             text=admin_status_caption_for(chat_id, label),
-            reply_markup=qr_dispute_keyboard(public_id, chat_id),
+            reply_markup=order_dispute_keyboard(public_id, chat_id, row, label),
         )
         if not edited:
             logger.warning("Could not edit %s message after admin status change for %s", label, public_id)
@@ -13296,6 +13453,8 @@ async def create_api_qr_offer(sender_chat_id: int, image_bytes: bytes) -> dict:
         raise ApiFlowError(403, "Only active sender accounts can submit QR codes.")
 
     settings = get_marketplace_settings()
+    if not send_method_enabled("qr", settings):
+        raise ApiFlowError(503, "QR submissions are disabled by admin.")
     if settings["maintenance_mode"]:
         raise ApiFlowError(503, "Maintenance mode is enabled. New QR submissions are paused.")
 
@@ -13508,6 +13667,111 @@ async def api_reply_dispute(ref_id: str, request: Request, authorization: str | 
     await notify_admins_dispute_reply(row, message)
     refreshed = get_dispute_by_ref(ref_id)
     return {"ok": True, "dispute": api_dispute_payload(refreshed, include_messages=True) if refreshed else {"ref_id": ref_id}}
+
+
+@web_app.get("/copy/access-token/{public_id}/{role}/{chat_id}", response_class=HTMLResponse)
+async def access_token_copy_page(public_id: str, role: str, chat_id: int, request: Request):
+    role = str(role or "").strip().lower()
+    if role not in {"sender", "receiver"}:
+        raise HTTPException(status_code=404, detail="Copy link not found")
+    row = get_photo_record(public_id)
+    if not row or order_payload_type(row) != "access_token":
+        raise HTTPException(status_code=404, detail="Access Token not found")
+    token_text = str(row["payload_text"] or "").strip()
+    if not token_text:
+        raise HTTPException(status_code=404, detail="Access Token is empty")
+    if role == "sender" and int(row["sender_chat_id"]) != int(chat_id):
+        raise HTTPException(status_code=403, detail="This copy link is not for this sender")
+    if role == "receiver" and int(row["receiver_chat_id"] or 0) != int(chat_id):
+        raise HTTPException(status_code=403, detail="This copy link is not for this receiver")
+    expected_sig = _access_token_copy_signature(public_id, role, int(chat_id), token_text)
+    given_sig = str(request.query_params.get("sig") or "")
+    if not given_sig or not hmac.compare_digest(given_sig, expected_sig):
+        raise HTTPException(status_code=403, detail="Invalid or expired copy link")
+
+    def _js_json(value: str) -> str:
+        return json.dumps(str(value)).replace("</", "<\\/")
+
+    token_json = _js_json(token_text)
+    token_html = esc(token_text)
+    title = esc(tr_chat(chat_id, "copy_access_token_title"))
+    trying = esc(tr_chat(chat_id, "copy_access_token_status_trying"))
+    copied = tr_chat(chat_id, "copy_access_token_status_copied")
+    manual = tr_chat(chat_id, "copy_access_token_status_manual")
+    copied_html = esc(copied)
+    manual_html = esc(manual)
+    button = esc(tr_chat(chat_id, "copy_access_token_button"))
+    order_id = esc(public_id)
+    return HTMLResponse(f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{title}</title>
+  <style>
+    :root {{ color-scheme: dark; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#050816; color:#e5e7eb; }}
+    main {{ width:min(980px,100%); margin:0 auto; padding:18px; }}
+    .card {{ background:#111827; border:1px solid #374151; border-radius:18px; padding:18px; box-shadow:0 20px 60px rgba(0,0,0,.35); }}
+    h1 {{ margin:0 0 8px; font-size:24px; }}
+    .muted {{ color:#9ca3af; }}
+    .status {{ margin:14px 0; padding:12px 14px; border-radius:12px; background:#0f172a; border:1px solid #374151; }}
+    button {{ width:100%; border:0; border-radius:14px; padding:15px 18px; font-weight:800; font-size:17px; color:#06111f; background:#38bdf8; cursor:pointer; }}
+    button:active {{ transform: translateY(1px); }}
+    textarea {{ width:100%; min-height:56vh; margin-top:14px; padding:14px; resize:vertical; border-radius:14px; border:1px solid #374151; background:#020617; color:#e5e7eb; font:14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }}
+    .hint {{ margin-top:12px; font-size:13px; color:#9ca3af; }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="card">
+      <h1>{title}</h1>
+      <div class="muted">Order ID: <strong>{order_id}</strong></div>
+      <div id="status" class="status">{trying}</div>
+      <button id="copyBtn" type="button">{button}</button>
+      <textarea id="tokenBox" readonly spellcheck="false" autocomplete="off">{token_html}</textarea>
+      <div class="hint">{manual_html}</div>
+    </div>
+  </main>
+  <script>
+    const token = {token_json};
+    const copiedText = {_js_json(copied)};
+    const manualText = {_js_json(manual)};
+    const statusEl = document.getElementById('status');
+    const box = document.getElementById('tokenBox');
+    function selectWholeToken() {{
+      box.focus({{preventScroll:true}});
+      box.value = token;
+      box.setSelectionRange(0, box.value.length);
+    }}
+    async function copyFullToken() {{
+      selectWholeToken();
+      try {{
+        if (navigator.clipboard && window.isSecureContext) {{
+          await navigator.clipboard.writeText(token);
+        }} else {{
+          const ok = document.execCommand('copy');
+          if (!ok) throw new Error('copy command failed');
+        }}
+        statusEl.textContent = copiedText;
+        statusEl.style.borderColor = '#22c55e';
+        return true;
+      }} catch (err) {{
+        statusEl.textContent = manualText;
+        statusEl.style.borderColor = '#f59e0b';
+        return false;
+      }}
+    }}
+    document.getElementById('copyBtn').addEventListener('click', copyFullToken);
+    document.addEventListener('DOMContentLoaded', () => {{
+      box.value = token;
+      copyFullToken();
+    }});
+    document.body.addEventListener('click', copyFullToken, {{ once: true }});
+  </script>
+</body>
+</html>""")
 
 
 def _background_task_done(name: str):
@@ -15334,20 +15598,93 @@ async def admin_marketplace(request: Request):
         f'<option value="{esc(u["chat_id"])}">{esc(u["alias"] or u["username"] or u["chat_id"])}</option>'
         for u in receivers if u['chat_id'] != 0
     )
+    def send_method_card(method_key: str, title: str, enabled: bool, details_html: str, off_note: str) -> str:
+        checked = "checked" if enabled else ""
+        return (
+            '<div class="setting-card payment-method-card" data-send-method>'
+            '<div class="payment-method-header">'
+            f'<strong>{esc(title)}</strong>'
+            '<button type="button" class="payment-toggle-button" data-send-toggle-button></button>'
+            f'<input class="sr-only payment-toggle-input" type="checkbox" name="{esc(method_key)}_enabled" value="1" data-send-toggle {checked}>'
+            '</div>'
+            f'<p class="method-off-note muted">{esc(off_note)}</p>'
+            f'<div class="method-details" data-send-details>{details_html}</div>'
+            '</div>'
+        )
+
+    qr_details = f'''
+      <label>QR sender charge / done (USDT)
+        <input name="sender_rate_usdt" value="{esc(_money(settings['qr_sender_rate_usdt']))}">
+      </label>
+      <label>QR receiver earning / done (USDT)
+        <input name="receiver_rate_usdt" value="{esc(_money(settings['qr_receiver_rate_usdt']))}">
+      </label>
+      <small class="muted">When disabled, senders cannot submit QR photos and receivers will not get new QR offers.</small>
+    '''
+    access_token_details = f'''
+      <label>Access Token sender charge / done (USDT)
+        <input name="access_token_sender_rate_usdt" value="{esc(_money(settings['access_token_sender_rate_usdt']))}">
+      </label>
+      <label>Access Token receiver earning / done (USDT)
+        <input name="access_token_receiver_rate_usdt" value="{esc(_money(settings['access_token_receiver_rate_usdt']))}">
+      </label>
+      <small class="muted">When disabled, Access Token is hidden from sender menus and no new token offers can be created.</small>
+    '''
+
     body = f'''
     <div class="card"><h2>📡 Marketplace</h2>
-      <p class="muted">Pairing is disabled. Sender QRs become open offers for online receivers.</p>
+      <p class="muted">Pairing is disabled. Sender submissions become open offers for online receivers. Turn methods on/off here for both senders and receivers.</p>
       <form method="post" action="/admin/marketplace/settings">
-        <div class="row">
-          <div><label>QR sender charge / done (USDT)</label><input name="sender_rate_usdt" value="{esc(_money(settings['qr_sender_rate_usdt']))}"></div>
-          <div><label>QR receiver earning / done (USDT)</label><input name="receiver_rate_usdt" value="{esc(_money(settings['qr_receiver_rate_usdt']))}"></div>
-          <div><label>Access Token sender charge / done (USDT)</label><input name="access_token_sender_rate_usdt" value="{esc(_money(settings['access_token_sender_rate_usdt']))}"></div>
-          <div><label>Access Token receiver earning / done (USDT)</label><input name="access_token_receiver_rate_usdt" value="{esc(_money(settings['access_token_receiver_rate_usdt']))}"></div>
-          <div><label>Minimum payout request (USDT)</label><input name="min_payout_usdt" value="{esc(_money(settings['min_payout_usdt']))}"></div>
+        <div class="settings-grid">
+          {send_method_card('qr', 'QR scan method', bool(settings['qr_enabled']), qr_details, 'Disabled — users will not see/send QR, and new QR offers will stop.')}
+          {send_method_card('access_token', 'Access Token method', bool(settings['access_token_enabled']), access_token_details, 'Disabled — users will not see/send Access Token, and new token offers will stop.')}
+          <div class="setting-card">
+            <h3>Minimum payout</h3>
+            <p class="muted">Receiver withdrawal threshold.</p>
+            <label>Minimum payout request (USDT)
+              <input name="min_payout_usdt" value="{esc(_money(settings['min_payout_usdt']))}">
+            </label>
+          </div>
         </div>
         <button type="submit">💾 Save marketplace settings</button>
       </form>
     </div>
+    <script>
+    function syncSendMethodCards() {{
+      document.querySelectorAll('[data-send-method]').forEach((card) => {{
+        const toggle = card.querySelector('[data-send-toggle]');
+        const button = card.querySelector('[data-send-toggle-button]');
+        const details = card.querySelector('[data-send-details]');
+        const enabled = Boolean(toggle && toggle.checked);
+        card.classList.toggle('is-disabled', !enabled);
+        if (button) {{
+          button.textContent = enabled ? 'Disable' : 'Enable';
+          button.classList.toggle('enabled', enabled);
+          button.classList.toggle('disabled', !enabled);
+          button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        }}
+        if (details) {{
+          details.querySelectorAll('input, textarea, select').forEach((field) => {{
+            field.readOnly = !enabled;
+            field.tabIndex = enabled ? 0 : -1;
+            field.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+          }});
+        }}
+      }});
+    }}
+    document.addEventListener('DOMContentLoaded', () => {{
+      syncSendMethodCards();
+      document.querySelectorAll('[data-send-toggle-button]').forEach((button) => {{
+        button.addEventListener('click', () => {{
+          const card = button.closest('[data-send-method]');
+          const toggle = card ? card.querySelector('[data-send-toggle]') : null;
+          if (!toggle) return;
+          toggle.checked = !toggle.checked;
+          syncSendMethodCards();
+        }});
+      }});
+    }});
+    </script>
     <div class="card"><h3>Receiver online/offline toggle</h3>
       <form method="post" action="/admin/marketplace/receiver">
         <div class="row">
@@ -15388,9 +15725,14 @@ async def admin_marketplace_settings(request: Request):
     if guard:
         return guard
     form = await request.form()
+    set_admin_setting("qr_enabled", "1" if form.get("qr_enabled") else "0")
+    set_admin_setting("access_token_enabled", "1" if form.get("access_token_enabled") else "0")
     for key in ("sender_rate_usdt", "receiver_rate_usdt", "access_token_sender_rate_usdt", "access_token_receiver_rate_usdt", "min_payout_usdt"):
         set_admin_setting(key, str(form.get(key, "")).strip())
-    return redirect_with_msg("/admin/marketplace", "Marketplace settings saved.")
+    note = "Marketplace settings saved."
+    if not form.get("qr_enabled") and not form.get("access_token_enabled"):
+        note += " Warning: all send methods are disabled."
+    return redirect_with_msg("/admin/marketplace", note)
 
 
 @web_app.post("/admin/marketplace/receiver")
