@@ -3165,6 +3165,48 @@ def stats_summary_text(
     )
 
 
+def ranking_rows(role: str, limit: int = 10000) -> list[sqlite3.Row]:
+    """Return sender/receiver order rankings sorted by completed orders first."""
+    role = (role or "").strip().lower()
+    if role == "receiver":
+        id_expr = "p.receiver_chat_id"
+        where = "WHERE p.receiver_chat_id IS NOT NULL"
+    elif role == "sender":
+        id_expr = "p.sender_chat_id"
+        where = "WHERE p.sender_chat_id IS NOT NULL"
+    else:
+        raise ValueError("role must be sender or receiver")
+
+    with get_conn() as conn:
+        return conn.execute(
+            f"""
+            SELECT
+                {id_expr} AS chat_id,
+                COALESCE(u.role, ?) AS role,
+                u.alias,
+                COALESCE(u.active, 0) AS active,
+                pfile.username,
+                pfile.first_name,
+                pfile.last_name,
+                pfile.last_seen_at,
+                COUNT(*) AS all_orders,
+                SUM(CASE WHEN p.status = 'done' THEN 1 ELSE 0 END) AS done_orders,
+                SUM(CASE WHEN p.status = 'failed' THEN 1 ELSE 0 END) AS failed_orders,
+                SUM(CASE WHEN p.status = 'pending' THEN 1 ELSE 0 END) AS pending_orders,
+                MAX(CASE WHEN p.status = 'done' THEN COALESCE(p.status_at, p.settled_at, p.created_at) END) AS last_done_at,
+                MAX(p.created_at) AS last_order_at
+            FROM photos p
+            LEFT JOIN users u ON u.chat_id = {id_expr}
+            LEFT JOIN telegram_profiles pfile ON pfile.chat_id = {id_expr}
+            {where}
+            GROUP BY {id_expr}
+            ORDER BY done_orders DESC, all_orders DESC, failed_orders ASC, {id_expr} ASC
+            LIMIT ?
+            """,
+            (role, int(limit)),
+        ).fetchall()
+
+
 def stats_for_pair_text(pair_row: sqlite3.Row) -> str:
     # Keep Telegram pair stats private-safe: do not show raw sender/receiver IDs.
     label = pair_row["label"] or "Unnamed pair"
@@ -13965,7 +14007,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           <a href="/admin">🏠 Dashboard</a>
           <a href="/admin/users">👥 Users</a>
           <a href="/admin/marketplace">📡 Marketplace</a>
-          <a href="/admin/access-token-keys">🔑 Access Token Keys <span class="nav-count">{available_access_token_key_count()}</span></a>
+          <a href="/admin/access-token-keys">Access Token Keys <span class="nav-count">{available_access_token_key_count()}</span></a>
           <a href="/admin/payment-reviews">🧾 Pending Payments <span class="nav-count">{pending_payment_review_count()}</span></a>
           <a href="/admin/wallet-deposits">🏦 Wallet Deposits</a>
           <a href="/admin/payments">💳 Payment Settings</a>
@@ -13975,6 +14017,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           <a href="/admin/polls">🗳️ Polls</a>
           <a href="/admin/messages">💬 Preset Messages</a>
           <a href="/admin/stats">📊 Stats</a>
+          <a href="/admin/rankings">🏆 Rankings</a>
           <a href="/admin/pending">⏳ Pending QR</a>
           <a href="/admin/settings">🔐 Secret Settings</a>
           <a href="/admin/logout">🚪 Logout</a>
@@ -15002,6 +15045,103 @@ async def admin_stats(request: Request):
         body += '</table></div>'
     body += '</div>'
     return render_page("Stats", body, request)
+
+
+@web_app.get("/admin/rankings", response_class=HTMLResponse)
+async def admin_rankings(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+
+    sender_rows = ranking_rows("sender")
+    receiver_rows = ranking_rows("receiver")
+
+    def row_int(row: sqlite3.Row, key: str) -> int:
+        try:
+            return int(row[key] or 0)
+        except Exception:
+            return 0
+
+    def done_rate(row: sqlite3.Row) -> str:
+        total = row_int(row, "all_orders")
+        if total <= 0:
+            return "0%"
+        return f"{(row_int(row, 'done_orders') * 100 / total):.1f}%"
+
+    def top_card(title: str, rows: list[sqlite3.Row]) -> str:
+        if not rows:
+            return f'<div class="card"><h3>{esc(title)}</h3><p>No orders yet.</p></div>'
+        row = rows[0]
+        return (
+            f'<div class="card"><h3>{esc(title)}</h3>'
+            f'<div>{user_link(row)}</div>'
+            f'<p style="font-size:34px;margin:10px 0 0;">{esc(row_int(row, "done_orders"))}</p>'
+            f'<p class="muted">Done orders · All: {esc(row_int(row, "all_orders"))} · Failed: {esc(row_int(row, "failed_orders"))}</p>'
+            f'</div>'
+        )
+
+    def ranking_table(title: str, rows: list[sqlite3.Row], page_key: str) -> str:
+        html_parts = [
+            f'<div class="card"><h2>{esc(title)}</h2>',
+            '<p class="muted small">Ranking is sorted by <b>Done orders</b> first. All orders includes pending, done, and failed orders.</p>',
+        ]
+        if not rows:
+            html_parts.append('<p>No order data yet.</p></div>')
+            return ''.join(html_parts)
+
+        indexed_rows = list(enumerate(rows, 1))
+        paged_rows, pager_html = paginate_items(indexed_rows, request, key=page_key, per_page=25)
+        html_parts.append(
+            '<div class="table-wrap"><table class="compact-table">'
+            '<tr>'
+            '<th class="cell-center">Rank</th>'
+            '<th>User</th>'
+            '<th class="cell-center">Account</th>'
+            '<th class="cell-center">All orders</th>'
+            '<th class="cell-center">Done orders</th>'
+            '<th class="cell-center">Failed orders</th>'
+            '<th class="cell-center">Pending orders</th>'
+            '<th class="cell-center">Done rate</th>'
+            '<th class="created-cell">Last done</th>'
+            '<th class="created-cell">Last order</th>'
+            '</tr>'
+        )
+        for rank, row in paged_rows:
+            active_html = badge(bool(row_int(row, "active")))
+            last_done = display_datetime(row["last_done_at"]) if row["last_done_at"] else "—"
+            last_order = display_datetime(row["last_order_at"]) if row["last_order_at"] else "—"
+            html_parts.append(
+                '<tr>'
+                f'<td class="cell-center"><strong>#{esc(rank)}</strong></td>'
+                f'<td>{user_link(row)}</td>'
+                f'<td class="cell-center">{active_html}</td>'
+                f'<td class="cell-center">{esc(row_int(row, "all_orders"))}</td>'
+                f'<td class="cell-center"><strong>{esc(row_int(row, "done_orders"))}</strong></td>'
+                f'<td class="cell-center">{esc(row_int(row, "failed_orders"))}</td>'
+                f'<td class="cell-center">{esc(row_int(row, "pending_orders"))}</td>'
+                f'<td class="cell-center">{esc(done_rate(row))}</td>'
+                f'<td class="created-cell">{esc(last_done)}</td>'
+                f'<td class="created-cell">{esc(last_order)}</td>'
+                '</tr>'
+            )
+        html_parts.append('</table></div>')
+        html_parts.append(pager_html)
+        html_parts.append('</div>')
+        return ''.join(html_parts)
+
+    total_sender_done = sum(row_int(r, "done_orders") for r in sender_rows)
+    total_receiver_done = sum(row_int(r, "done_orders") for r in receiver_rows)
+    body = (
+        '<div class="cards two">'
+        + top_card("🏆 Top sender", sender_rows)
+        + top_card("🏆 Top receiver", receiver_rows)
+        + f'<div class="card"><h3>✅ Sender done total</h3><p style="font-size:34px;margin:0;">{esc(total_sender_done)}</p><p class="muted">Completed orders by all senders</p></div>'
+        + f'<div class="card"><h3>✅ Receiver done total</h3><p style="font-size:34px;margin:0;">{esc(total_receiver_done)}</p><p class="muted">Completed orders by all receivers</p></div>'
+        + '</div>'
+    )
+    body += ranking_table("📤 Sender ranking", sender_rows, "sender_rank_page")
+    body += ranking_table("📥 Receiver ranking", receiver_rows, "receiver_rank_page")
+    return render_page("Rankings", body, request)
 
 @web_app.get("/admin/stats/pair/{sender_chat_id}", response_class=HTMLResponse)
 async def admin_stats_pair(request: Request, sender_chat_id: int):
