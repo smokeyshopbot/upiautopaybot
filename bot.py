@@ -50,7 +50,7 @@ from dotenv import load_dotenv
 from telegram import BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.constants import ChatType
 from telegram.error import TelegramError
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Header
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 import uvicorn
 try:
@@ -173,6 +173,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Open marketplace settings. The web panel can override most of these in Secret Settings / Payments.
 QR_EXPIRE_MINUTES = int(os.getenv("QR_EXPIRE_MINUTES", "5"))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(QR_EXPIRE_MINUTES)))
 SENDER_CANCEL_WAIT_SECONDS = int(os.getenv("SENDER_CANCEL_WAIT_SECONDS", "120"))
 MARKETPLACE_WATCH_INTERVAL_SECONDS = int(os.getenv("MARKETPLACE_WATCH_INTERVAL_SECONDS", "10"))
 PAYMENT_WATCH_INTERVAL_SECONDS = int(os.getenv("PAYMENT_WATCH_INTERVAL_SECONDS", "30"))
@@ -200,6 +201,17 @@ MANUAL_VERIFICATION_DELAY_MINUTES = int(os.getenv("MANUAL_VERIFICATION_DELAY_MIN
 PAYMENT_VERIFY_TASK_TIMEOUT_SECONDS = int(os.getenv("PAYMENT_VERIFY_TASK_TIMEOUT_SECONDS", "60"))
 DEFAULT_SENDER_RATE_USDT = os.getenv("DEFAULT_SENDER_RATE_USDT", "0.50").strip() or "0.50"
 DEFAULT_RECEIVER_RATE_USDT = os.getenv("DEFAULT_RECEIVER_RATE_USDT", "0").strip() or "0"
+DEFAULT_ACCESS_TOKEN_SENDER_RATE_USDT = (
+    os.getenv("DEFAULT_ACCESS_TOKEN_SENDER_RATE_USDT", "").strip()
+    or DEFAULT_SENDER_RATE_USDT
+)
+DEFAULT_ACCESS_TOKEN_RECEIVER_RATE_USDT = (
+    os.getenv("DEFAULT_ACCESS_TOKEN_RECEIVER_RATE_USDT", "").strip()
+    or DEFAULT_RECEIVER_RATE_USDT
+)
+ACCESS_TOKEN_KEY_LOW_THRESHOLD = int(os.getenv("ACCESS_TOKEN_KEY_LOW_THRESHOLD", "10"))
+ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS = int(os.getenv("ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS", "3600"))
+OFFER_TIMER_REFRESH_SECONDS = int(os.getenv("OFFER_TIMER_REFRESH_SECONDS", "5"))
 DEFAULT_MIN_PAYOUT_USDT = os.getenv("DEFAULT_MIN_PAYOUT_USDT", "1").strip() or "1"
 DEFAULT_MIN_WALLET_TOPUP_USDT = os.getenv("DEFAULT_MIN_WALLET_TOPUP_USDT", "1").strip() or "1"
 DEFAULT_BEP20_MANUAL_TOLERANCE_USDT = os.getenv("BEP20_MANUAL_TOLERANCE_USDT", "0.01").strip() or "0.01"
@@ -220,6 +232,8 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "").strip()
 BINANCE_API_BASE_URL = os.getenv("BINANCE_API_BASE_URL", "https://api.binance.com").strip().rstrip("/") or "https://api.binance.com"
 BINANCE_PAY_HISTORY_LOOKBACK_SECONDS = int(os.getenv("BINANCE_PAY_HISTORY_LOOKBACK_SECONDS", "3600"))
 BINANCE_RECV_WINDOW_MS = int(os.getenv("BINANCE_RECV_WINDOW_MS", "5000"))
+API_KEYS_RAW = os.getenv("API_KEYS", "").strip()
+API_MAX_UPLOAD_BYTES = int(os.getenv("API_MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -440,6 +454,31 @@ def parse_admin_ids(raw: str) -> set[int]:
 
 
 ADMIN_IDS = parse_admin_ids(ADMIN_IDS_RAW)
+
+
+def parse_api_keys(raw: str) -> dict[str, int]:
+    keys: dict[str, int] = {}
+    for item in re.split(r"[\n,;]+", str(raw or "")):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            logger.warning("Ignoring invalid API_KEYS entry without ':' separator.")
+            continue
+        token, chat_id_raw = item.split(":", 1)
+        token = token.strip()
+        chat_id_raw = chat_id_raw.strip()
+        if not token or not chat_id_raw:
+            logger.warning("Ignoring invalid API_KEYS entry with empty token/chat_id.")
+            continue
+        try:
+            keys[token] = int(chat_id_raw)
+        except ValueError:
+            logger.warning("Ignoring invalid API_KEYS chat_id: %r", chat_id_raw)
+    return keys
+
+
+API_KEYS = parse_api_keys(API_KEYS_RAW)
 
 
 def parse_contact_list(raw: str) -> list[str]:
@@ -801,7 +840,7 @@ _ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
         "stats_done": "Done",
         "stats_failed": "Failed",
         "caption_date": "Date",
-        "caption_photo_today": "Photo #{daily_no} today",
+        "caption_photo_today": "Order #{daily_no} today",
         "caption_id": "ID",
         "caption_expires": "Expires",
         "caption_time_left": "Time left",
@@ -834,12 +873,16 @@ _ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
         "expired_offer_text": "⏱ Offer expired.\n🆔 Offer ID: {public_id}\nThis QR can no longer be accepted or completed.",
         "expired_caption_status_line": "⏱ Status: EXPIRED",
         "qr_marked_failed": "❌ QR marked failed",
+        "access_token_marked_failed": "❌ Access Token marked failed",
         "select_failure_reason": "❌ Select failure reason.\n🆔 ID: {public_id}",
         "select_failure_reason_alert": "Select failure reason.",
         "marked_failed_alert": "Marked failed.",
         "fail_reason_qr_not_working": "❌ QR not working",
         "fail_reason_qr_expired": "⏱ QR expired",
         "fail_reason_limit_over": "🚫 My limit is over",
+        "fail_reason_access_token_invalid": "❌ Access Token is invalid",
+        "fail_reason_access_token_expired": "⏱ Access Token expired",
+        "fail_reason_access_token_limit_over": "🚫 My limit is over",
         "only_active_sender_photos": "Only an active registered sender can send QR photos.",
         "maintenance_paused": "🚧 Maintenance mode is ON. New QR submissions are paused by admin.",
         "no_receiver_online": "No receiver is online right now. Use /status to check capacity before sending.",
@@ -864,8 +907,8 @@ _ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
         "receiver_qr_timer_hint": "Harap tandai Selesai atau Gagal sebelum QR ini kedaluwarsa.", "receiver_expiry_warning": "⚠️ QR ini akan kedaluwarsa sekitar {time_left}. Harap tandai Selesai atau Gagal sebelum kedaluwarsa.", "receiver_time_left_line": "⏳ Sisa waktu: {time_left}",
         "time_expired": "kedaluwarsa", "time_seconds": "{seconds} dtk", "time_minutes_seconds": "{minutes} mnt {seconds} dtk", "status_expired_caps": "KEDALUWARSA", "status_expired_by_admin_caps": "DIKEDALUWARSAKAN ADMIN",
         "expired_offer_text": "⏱ Penawaran kedaluwarsa.\n🆔 ID Penawaran: {public_id}\nQR ini tidak dapat diterima atau diselesaikan lagi.", "expired_caption_status_line": "⏱ Status: KEDALUWARSA",
-        "qr_marked_failed": "❌ QR ditandai gagal", "select_failure_reason": "❌ Pilih alasan kegagalan.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Pilih alasan kegagalan.", "marked_failed_alert": "Ditandai gagal.",
-        "fail_reason_qr_not_working": "❌ QR tidak berfungsi", "fail_reason_qr_expired": "⏱ QR kedaluwarsa", "fail_reason_limit_over": "🚫 Limit saya habis",
+        "qr_marked_failed": "❌ QR ditandai gagal", "access_token_marked_failed": "❌ Access Token ditandai gagal", "select_failure_reason": "❌ Pilih alasan kegagalan.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Pilih alasan kegagalan.", "marked_failed_alert": "Ditandai gagal.",
+        "fail_reason_qr_not_working": "❌ QR tidak berfungsi", "fail_reason_qr_expired": "⏱ QR kedaluwarsa", "fail_reason_limit_over": "🚫 Limit saya habis", "fail_reason_access_token_invalid": "❌ Access Token tidak valid", "fail_reason_access_token_expired": "⏱ Access Token kedaluwarsa", "fail_reason_access_token_limit_over": "🚫 Limit saya habis",
         "only_active_sender_photos": "Hanya pengirim terdaftar yang aktif yang dapat mengirim foto QR.", "maintenance_paused": "🚧 Mode pemeliharaan AKTIF. Pengiriman QR baru dijeda oleh admin.", "no_receiver_online": "Tidak ada penerima yang online saat ini. Gunakan /status untuk memeriksa kapasitas sebelum mengirim.",
         "insufficient_wallet": "Saldo wallet tidak cukup. Diperlukan per scan: ${required} USDT.\nTersedia: ${available} USDT.\n\nGunakan /wallet dan /loadwallet untuk menambah saldo.",
         "photo_rejected_clear_qr": "Foto ditolak: {error}\n\nKirim foto yang jelas berisi tepat satu kode QR yang dapat dibaca. Caption/teks diabaikan.", "photo_rejected_process": "Foto ditolak: saya tidak dapat memproses gambar QR tersebut.", "clean_qr_send_failed": "Saya sudah membuat QR bersih, tetapi tidak dapat menyimpan/mengirimkannya kepada Anda. Silakan coba lagi.", "send_photo_not_document": "Harap kirim QR sebagai foto Telegram, bukan sebagai dokumen. Foto lebih cepat diproses.",
@@ -881,8 +924,8 @@ _ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
         "receiver_qr_timer_hint": "Vui lòng đánh dấu Hoàn tất hoặc Thất bại trước khi QR này hết hạn.", "receiver_expiry_warning": "⚠️ QR này sẽ hết hạn sau khoảng {time_left}. Vui lòng đánh dấu Hoàn tất hoặc Thất bại trước khi hết hạn.", "receiver_time_left_line": "⏳ Thời gian còn lại: {time_left}",
         "time_expired": "đã hết hạn", "time_seconds": "{seconds} giây", "time_minutes_seconds": "{minutes} phút {seconds} giây", "status_expired_caps": "ĐÃ HẾT HẠN", "status_expired_by_admin_caps": "ADMIN ĐÃ CHO HẾT HẠN",
         "expired_offer_text": "⏱ Ưu đãi đã hết hạn.\n🆔 ID ưu đãi: {public_id}\nQR này không thể được nhận hoặc hoàn tất nữa.", "expired_caption_status_line": "⏱ Trạng thái: ĐÃ HẾT HẠN",
-        "qr_marked_failed": "❌ QR đã được đánh dấu thất bại", "select_failure_reason": "❌ Chọn lý do thất bại.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Chọn lý do thất bại.", "marked_failed_alert": "Đã đánh dấu thất bại.",
-        "fail_reason_qr_not_working": "❌ QR không hoạt động", "fail_reason_qr_expired": "⏱ QR đã hết hạn", "fail_reason_limit_over": "🚫 Tôi đã hết hạn mức",
+        "qr_marked_failed": "❌ QR đã được đánh dấu thất bại", "access_token_marked_failed": "❌ Access Token đã được đánh dấu thất bại", "select_failure_reason": "❌ Chọn lý do thất bại.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Chọn lý do thất bại.", "marked_failed_alert": "Đã đánh dấu thất bại.",
+        "fail_reason_qr_not_working": "❌ QR không hoạt động", "fail_reason_qr_expired": "⏱ QR đã hết hạn", "fail_reason_limit_over": "🚫 Tôi đã hết hạn mức", "fail_reason_access_token_invalid": "❌ Access Token không hợp lệ", "fail_reason_access_token_expired": "⏱ Access Token đã hết hạn", "fail_reason_access_token_limit_over": "🚫 Tôi đã hết hạn mức",
         "only_active_sender_photos": "Chỉ người gửi đã đăng ký và đang hoạt động mới có thể gửi ảnh QR.", "maintenance_paused": "🚧 Chế độ bảo trì đang BẬT. Admin đã tạm dừng gửi QR mới.", "no_receiver_online": "Hiện không có người nhận nào online. Dùng /status để kiểm tra sức chứa trước khi gửi.",
         "insufficient_wallet": "Số dư ví không đủ. Cần cho mỗi lượt quét: ${required} USDT.\nKhả dụng: ${available} USDT.\n\nDùng /wallet và /loadwallet để nạp thêm.",
         "photo_rejected_clear_qr": "Ảnh bị từ chối: {error}\n\nGửi ảnh rõ ràng chứa đúng một mã QR có thể đọc được. Chú thích/văn bản sẽ bị bỏ qua.", "photo_rejected_process": "Ảnh bị từ chối: tôi không thể xử lý ảnh QR đó.", "clean_qr_send_failed": "Tôi đã tạo QR sạch nhưng không thể lưu/gửi lại cho bạn. Vui lòng thử lại.", "send_photo_not_document": "Vui lòng gửi QR dưới dạng ảnh Telegram, không phải tài liệu. Ảnh được xử lý nhanh hơn.",
@@ -898,8 +941,8 @@ _ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
         "receiver_qr_timer_hint": "请在此 QR 过期前标记完成或失败。", "receiver_expiry_warning": "⚠️ 此 QR 大约将在 {time_left} 后过期。请在过期前标记完成或失败。", "receiver_time_left_line": "⏳ 剩余时间：{time_left}",
         "time_expired": "已过期", "time_seconds": "{seconds}秒", "time_minutes_seconds": "{minutes}分 {seconds}秒", "status_expired_caps": "已过期", "status_expired_by_admin_caps": "管理员已设为过期",
         "expired_offer_text": "⏱ 报价已过期。\n🆔 报价 ID：{public_id}\n此 QR 不能再被接受或完成。", "expired_caption_status_line": "⏱ 状态：已过期",
-        "qr_marked_failed": "❌ QR 已标记为失败", "select_failure_reason": "❌ 请选择失败原因。\n🆔 ID：{public_id}", "select_failure_reason_alert": "请选择失败原因。", "marked_failed_alert": "已标记为失败。",
-        "fail_reason_qr_not_working": "❌ QR 无法使用", "fail_reason_qr_expired": "⏱ QR 已过期", "fail_reason_limit_over": "🚫 我的额度已用完",
+        "qr_marked_failed": "❌ QR 已标记为失败", "access_token_marked_failed": "❌ Access Token 已标记为失败", "select_failure_reason": "❌ 请选择失败原因。\n🆔 ID：{public_id}", "select_failure_reason_alert": "请选择失败原因。", "marked_failed_alert": "已标记为失败。",
+        "fail_reason_qr_not_working": "❌ QR 无法使用", "fail_reason_qr_expired": "⏱ QR 已过期", "fail_reason_limit_over": "🚫 我的额度已用完", "fail_reason_access_token_invalid": "❌ Access Token 无效", "fail_reason_access_token_expired": "⏱ Access Token 已过期", "fail_reason_access_token_limit_over": "🚫 我的额度已用完",
         "only_active_sender_photos": "只有已激活的注册发送方可以发送 QR 照片。", "maintenance_paused": "🚧 维护模式已开启。管理员已暂停新的 QR 提交。", "no_receiver_online": "当前没有接收方在线。发送前请使用 /status 查看容量。",
         "insufficient_wallet": "钱包余额不足。每次扫描需要：${required} USDT。\n可用：${available} USDT。\n\n请使用 /wallet 和 /loadwallet 充值。",
         "photo_rejected_clear_qr": "照片被拒绝：{error}\n\n请发送一张清晰照片，且只包含一个可读取的 QR 码。说明文字/文本会被忽略。", "photo_rejected_process": "照片被拒绝：我无法处理该 QR 图片。", "clean_qr_send_failed": "我已生成干净的 QR，但无法保存/发送给您。请重试。", "send_photo_not_document": "请将 QR 作为 Telegram 照片发送，不要作为文件发送。照片处理更快。",
@@ -915,8 +958,8 @@ _ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
         "receiver_qr_timer_hint": "Marca Completado o Fallido antes de que venza este QR.", "receiver_expiry_warning": "⚠️ Este QR vencerá en aproximadamente {time_left}. Marca Completado o Fallido antes del vencimiento.", "receiver_time_left_line": "⏳ Tiempo restante: {time_left}",
         "time_expired": "vencido", "time_seconds": "{seconds} s", "time_minutes_seconds": "{minutes} min {seconds} s", "status_expired_caps": "VENCIDO", "status_expired_by_admin_caps": "VENCIDO POR ADMIN",
         "expired_offer_text": "⏱ Oferta vencida.\n🆔 ID de oferta: {public_id}\nEste QR ya no se puede aceptar ni completar.", "expired_caption_status_line": "⏱ Estado: VENCIDO",
-        "qr_marked_failed": "❌ QR marcado como fallido", "select_failure_reason": "❌ Selecciona el motivo del fallo.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Selecciona el motivo del fallo.", "marked_failed_alert": "Marcado como fallido.",
-        "fail_reason_qr_not_working": "❌ El QR no funciona", "fail_reason_qr_expired": "⏱ El QR venció", "fail_reason_limit_over": "🚫 Mi límite se agotó",
+        "qr_marked_failed": "❌ QR marcado como fallido", "access_token_marked_failed": "❌ Access Token marcado como fallido", "select_failure_reason": "❌ Selecciona el motivo del fallo.\n🆔 ID: {public_id}", "select_failure_reason_alert": "Selecciona el motivo del fallo.", "marked_failed_alert": "Marcado como fallido.",
+        "fail_reason_qr_not_working": "❌ El QR no funciona", "fail_reason_qr_expired": "⏱ El QR venció", "fail_reason_limit_over": "🚫 Mi límite se agotó", "fail_reason_access_token_invalid": "❌ Access Token no válido", "fail_reason_access_token_expired": "⏱ Access Token vencido", "fail_reason_access_token_limit_over": "🚫 Mi límite se agotó",
         "only_active_sender_photos": "Solo un remitente registrado y activo puede enviar fotos QR.", "maintenance_paused": "🚧 El modo de mantenimiento está ACTIVADO. El admin pausó los nuevos envíos de QR.", "no_receiver_online": "No hay ningún receptor en línea ahora. Usa /status para revisar la capacidad antes de enviar.",
         "insufficient_wallet": "Saldo insuficiente en la billetera. Requerido por escaneo: ${required} USDT.\nDisponible: ${available} USDT.\n\nUsa /wallet y /loadwallet para añadir saldo.",
         "photo_rejected_clear_qr": "Foto rechazada: {error}\n\nEnvía una foto clara que contenga exactamente un código QR legible. Los textos/captions se ignoran.", "photo_rejected_process": "Foto rechazada: no pude procesar esa imagen QR.", "clean_qr_send_failed": "Generé el QR limpio, pero no pude guardarlo/enviártelo. Inténtalo de nuevo.", "send_photo_not_document": "Envía el QR como foto de Telegram, no como documento. Las fotos se procesan más rápido.",
@@ -1444,6 +1487,111 @@ for _code in SUPPORTED_LANGUAGES:
         _TRANSLATIONS[_code].setdefault(_k, _v)
 
 
+_SEND_METHOD_TRANSLATIONS: dict[str, dict[str, str]] = {
+    "en": {
+        "send_choose_method": "Choose what you want to send:",
+        "send_invalid_method": "Invalid send method.",
+        "send_qr_prompt": "Send a QR photo now. Send /cancel to abort.",
+        "send_access_token_prompt": "Send the Access Token now. Send /cancel to abort.",
+        "access_token_too_short": "Access Token is too short. Send at least 2 characters.",
+        "access_token_too_long": "Access Token is too long. Keep it under 3500 characters.",
+        "access_token_send_failed": "I could not save/send that Access Token offer. Please try again.",
+        "qr_text_wrong_mode": "You selected QR. Please send the QR photo, or send /cancel to abort.",
+        "access_token_photo_wrong_mode": "You selected Access Token. Please send the Access Token message, or send /cancel to abort.",
+        "send_flow_cancelled": "Cancelled.",
+    },
+    "id": {
+        "send_choose_method": "Pilih yang ingin Anda kirim:",
+        "send_invalid_method": "Metode pengiriman tidak valid.",
+        "send_qr_prompt": "Kirim foto QR sekarang. Kirim /cancel untuk membatalkan.",
+        "send_access_token_prompt": "Kirim Access Token sekarang. Kirim /cancel untuk membatalkan.",
+        "access_token_too_short": "Access Token terlalu pendek. Kirim minimal 2 karakter.",
+        "access_token_too_long": "Access Token terlalu panjang. Maksimal 3500 karakter.",
+        "access_token_send_failed": "Saya tidak dapat menyimpan/mengirim penawaran Access Token itu. Silakan coba lagi.",
+        "qr_text_wrong_mode": "Anda memilih QR. Silakan kirim foto QR, atau kirim /cancel untuk membatalkan.",
+        "access_token_photo_wrong_mode": "Anda memilih Access Token. Silakan kirim pesan Access Token, atau kirim /cancel untuk membatalkan.",
+        "send_flow_cancelled": "Dibatalkan.",
+    },
+    "vi": {
+        "send_choose_method": "Chọn nội dung bạn muốn gửi:",
+        "send_invalid_method": "Phương thức gửi không hợp lệ.",
+        "send_qr_prompt": "Hãy gửi ảnh QR ngay bây giờ. Gửi /cancel để hủy.",
+        "send_access_token_prompt": "Hãy gửi Access Token ngay bây giờ. Gửi /cancel để hủy.",
+        "access_token_too_short": "Access Token quá ngắn. Hãy gửi ít nhất 2 ký tự.",
+        "access_token_too_long": "Access Token quá dài. Giữ dưới 3500 ký tự.",
+        "access_token_send_failed": "Tôi không thể lưu/gửi ưu đãi Access Token đó. Vui lòng thử lại.",
+        "qr_text_wrong_mode": "Bạn đã chọn QR. Vui lòng gửi ảnh QR, hoặc gửi /cancel để hủy.",
+        "access_token_photo_wrong_mode": "Bạn đã chọn Access Token. Vui lòng gửi tin nhắn Access Token, hoặc gửi /cancel để hủy.",
+        "send_flow_cancelled": "Đã hủy.",
+    },
+    "zh": {
+        "send_choose_method": "请选择要发送的内容：",
+        "send_invalid_method": "发送方式无效。",
+        "send_qr_prompt": "请现在发送 QR 照片。发送 /cancel 可取消。",
+        "send_access_token_prompt": "请现在发送 Access Token。发送 /cancel 可取消。",
+        "access_token_too_short": "Access Token 太短。请至少发送 2 个字符。",
+        "access_token_too_long": "Access Token 太长。请控制在 3500 个字符以内。",
+        "access_token_send_failed": "无法保存/发送该 Access Token 报价。请重试。",
+        "qr_text_wrong_mode": "您选择了 QR。请发送 QR 照片，或发送 /cancel 取消。",
+        "access_token_photo_wrong_mode": "您选择了 Access Token。请发送 Access Token 消息，或发送 /cancel 取消。",
+        "send_flow_cancelled": "已取消。",
+    },
+    "es": {
+        "send_choose_method": "Elige qué quieres enviar:",
+        "send_invalid_method": "Método de envío inválido.",
+        "send_qr_prompt": "Envía una foto QR ahora. Envía /cancel para cancelar.",
+        "send_access_token_prompt": "Envía el Access Token ahora. Envía /cancel para cancelar.",
+        "access_token_too_short": "Access Token es demasiado corto. Envía al menos 2 caracteres.",
+        "access_token_too_long": "Access Token es demasiado largo. Mantenlo por debajo de 3500 caracteres.",
+        "access_token_send_failed": "No pude guardar/enviar esa oferta de Access Token. Inténtalo de nuevo.",
+        "qr_text_wrong_mode": "Elegiste QR. Envía la foto QR, o envía /cancel para cancelar.",
+        "access_token_photo_wrong_mode": "Elegiste Access Token. Envía el mensaje de Access Token, o envía /cancel para cancelar.",
+        "send_flow_cancelled": "Cancelado.",
+    },
+}
+_SEND_METHOD_TRANSLATIONS["en"].update({
+    "access_token_scans_available": "Access Token scans available: {count}",
+    "access_token_scans_unavailable": "Access Token scans are currently unavailable. Please check back later; you will be notified via the bot once the service is available again.",
+    "btn_accept_access_token": "✅ Accept Access Token scan",
+    "offer_new_access_token": "📥 New Access Token scan available",
+    "offer_tap_to_claim_access_token": "Tap Accept Access Token scan to claim it. The Access Token will be sent only if you win the claim.",
+    "sender_access_token_offer_accepted": "⏳ Your Access Token offer was accepted. Waiting for receiver update.",
+    "receiver_access_token_timer_hint": "Please mark Done or Failed before this Access Token expires.",
+    "offer_claimed_access_token": "✅ You got this Access Token",
+    "access_token_key_delivery": "Access key for this Access Token order:\n<pre>{key}</pre>\n\nUse it once only. This key will be marked used when you tap Done.",
+    "access_token_key_delivery_failed": "Access Token was claimed, but the access key could not be delivered. Please contact admin.",
+})
+_SEND_METHOD_TRANSLATIONS["id"].update({
+    "access_token_scans_available": "Scan Access Token tersedia: {count}",
+    "access_token_scans_unavailable": "Scan Access Token saat ini tidak tersedia. Silakan cek kembali nanti dan Anda akan diberi tahu di bot saat tersedia lagi.",
+    "access_token_key_delivery": "Kunci akses untuk order Access Token ini:\n<pre>{key}</pre>\n\nGunakan satu kali saja. Kunci ini akan ditandai terpakai saat Anda mengetuk Done.",
+    "access_token_key_delivery_failed": "Access Token sudah diklaim, tetapi kunci akses tidak dapat dikirim. Silakan hubungi admin.",
+})
+_SEND_METHOD_TRANSLATIONS["vi"].update({
+    "access_token_scans_available": "Luot quet Access Token kha dung: {count}",
+    "access_token_scans_unavailable": "Luot quet Access Token hien khong kha dung. Vui long quay lai sau va bot se thong bao khi co lai.",
+    "access_token_key_delivery": "Khoa truy cap cho order Access Token nay:\n<pre>{key}</pre>\n\nChi dung mot lan. Khoa nay se duoc danh dau da dung khi ban nhan Done.",
+    "access_token_key_delivery_failed": "Access Token da duoc nhan, nhung khong the gui khoa truy cap. Vui long lien he admin.",
+})
+_SEND_METHOD_TRANSLATIONS["zh"].update({
+    "access_token_scans_available": "Access Token available scans: {count}",
+    "access_token_scans_unavailable": "Access Token scans are currently unavailable. The bot will notify you when they are available again.",
+    "access_token_key_delivery": "Access key for this Access Token order:\n<pre>{key}</pre>\n\nUse it once only. This key will be marked used when you tap Done.",
+    "access_token_key_delivery_failed": "Access Token was claimed, but the access key could not be delivered. Please contact admin.",
+})
+_SEND_METHOD_TRANSLATIONS["es"].update({
+    "access_token_scans_available": "Escaneos de Access Token disponibles: {count}",
+    "access_token_scans_unavailable": "Los escaneos de Access Token no estan disponibles ahora. Vuelve a comprobar mas tarde y el bot te avisara cuando esten disponibles otra vez.",
+    "access_token_key_delivery": "Clave de acceso para esta orden de Access Token:\n<pre>{key}</pre>\n\nUsala solo una vez. Esta clave se marcara como usada cuando pulses Done.",
+    "access_token_key_delivery_failed": "El Access Token fue aceptado, pero no se pudo enviar la clave de acceso. Contacta al admin.",
+})
+for _code, _items in _SEND_METHOD_TRANSLATIONS.items():
+    _TRANSLATIONS.setdefault(_code, {}).update(_items)
+for _code in SUPPORTED_LANGUAGES:
+    for _k, _v in _SEND_METHOD_TRANSLATIONS["en"].items():
+        _TRANSLATIONS[_code].setdefault(_k, _v)
+
+
 def normalize_language_code(value: str | None) -> str:
     code = str(value or "").strip().lower()
     if code in {"english", "eng"}:
@@ -1646,8 +1794,41 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         "settled_at": "TEXT",
         "failure_reason": "TEXT",
         "receiver_warning_sent_at": "TEXT",
+        "payload_type": "TEXT NOT NULL DEFAULT 'qr'",
+        "payload_text": "TEXT",
     }.items():
         _add_column_if_missing(conn, "photos", column, definition)
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS access_token_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key_ciphertext TEXT NOT NULL,
+            key_hash TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'available' CHECK(status IN ('available','reserved','used','review','removed')),
+            assigned_public_id TEXT,
+            assigned_receiver_chat_id INTEGER,
+            added_at TEXT NOT NULL,
+            reserved_at TEXT,
+            sent_at TEXT,
+            used_at TEXT,
+            review_at TEXT,
+            removed_at TEXT,
+            note TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_access_token_keys_status ON access_token_keys(status, id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_access_token_keys_order ON access_token_keys(assigned_public_id)")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS access_token_waitlist (
+            chat_id INTEGER PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            notified_at TEXT
+        )
+        """
+    )
 
     for column, definition in {
         "pay_to": "TEXT",
@@ -1958,6 +2139,8 @@ def init_db() -> None:
                 reserved_usdt REAL NOT NULL DEFAULT 0,
                 settled_at TEXT,
                 receiver_warning_sent_at TEXT,
+                payload_type TEXT NOT NULL DEFAULT 'qr',
+                payload_text TEXT,
                 FOREIGN KEY(sender_chat_id) REFERENCES users(chat_id),
                 FOREIGN KEY(receiver_chat_id) REFERENCES users(chat_id)
             );
@@ -3094,12 +3277,29 @@ def setting_sender_rate_decimal() -> Decimal:
     return max(Decimal("0"), amount)
 
 
+def setting_access_token_sender_rate_decimal() -> Decimal:
+    raw = get_admin_setting("access_token_sender_rate_usdt")
+    if raw is None or raw == "":
+        return setting_sender_rate_decimal()
+    return max(Decimal("0"), _dec(raw, DEFAULT_ACCESS_TOKEN_SENDER_RATE_USDT))
+
+
 def get_marketplace_settings() -> dict[str, Decimal | int | bool | str]:
+    qr_sender_rate = setting_sender_rate_decimal()
+    qr_receiver_rate = setting_decimal("receiver_rate_usdt", DEFAULT_RECEIVER_RATE_USDT)
+    access_token_sender_rate = setting_access_token_sender_rate_decimal()
+    access_token_receiver_raw = get_admin_setting("access_token_receiver_rate_usdt")
+    access_token_receiver_rate = _dec(access_token_receiver_raw, DEFAULT_ACCESS_TOKEN_RECEIVER_RATE_USDT) if access_token_receiver_raw not in {None, ""} else qr_receiver_rate
     return {
         "maintenance_mode": setting_bool("maintenance_mode", False),
-        "sender_rate_usdt": setting_sender_rate_decimal(),
-        "receiver_rate_usdt": setting_decimal("receiver_rate_usdt", DEFAULT_RECEIVER_RATE_USDT),
+        "sender_rate_usdt": qr_sender_rate,
+        "receiver_rate_usdt": qr_receiver_rate,
+        "qr_sender_rate_usdt": qr_sender_rate,
+        "qr_receiver_rate_usdt": qr_receiver_rate,
+        "access_token_sender_rate_usdt": access_token_sender_rate,
+        "access_token_receiver_rate_usdt": access_token_receiver_rate,
         "qr_expire_minutes": setting_int("qr_expire_minutes", QR_EXPIRE_MINUTES),
+        "access_token_expire_minutes": setting_int("access_token_expire_minutes", ACCESS_TOKEN_EXPIRE_MINUTES),
         "payment_timeout_minutes": setting_int("payment_timeout_minutes", PAYMENT_TIMEOUT_MINUTES),
         "payment_reminder_minutes": setting_int("payment_reminder_minutes", PAYMENT_REMINDER_MINUTES),
         "payment_watch_interval_seconds": setting_int("payment_watch_interval_seconds", PAYMENT_WATCH_INTERVAL_SECONDS),
@@ -3131,6 +3331,13 @@ def get_marketplace_settings() -> dict[str, Decimal | int | bool | str]:
         "binance_recv_window_ms": setting_int("binance_recv_window_ms", BINANCE_RECV_WINDOW_MS),
         "binance_pay_history_lookback_seconds": setting_int("binance_pay_history_lookback_seconds", BINANCE_PAY_HISTORY_LOOKBACK_SECONDS),
     }
+
+
+def marketplace_rates_for_payload(payload_type: str, settings: dict[str, Decimal | int | bool | str] | None = None) -> tuple[Decimal, Decimal]:
+    settings = settings or get_marketplace_settings()
+    if payload_type in {"access_token", "text"}:
+        return _dec(settings["access_token_sender_rate_usdt"]), _dec(settings["access_token_receiver_rate_usdt"])
+    return _dec(settings["qr_sender_rate_usdt"]), _dec(settings["qr_receiver_rate_usdt"])
 
 
 def _row_dec(row, key: str, default: Decimal | str | int | float = "0") -> Decimal:
@@ -4132,6 +4339,7 @@ def marketplace_status_text(for_chat_id: int | None = None) -> str:
             if rate > 0:
                 scans = str(max(0, int(available // rate)))
                 text += f"{tr_chat(for_chat_id, 'marketplace_estimated_scans', scans=scans)}\n"
+            text += f"{tr_chat(for_chat_id, 'access_token_scans_available', count=access_token_scans_available_count())}\n"
         elif user and user.role == "receiver":
             presence = receiver_presence_row(for_chat_id)
             if presence and presence["online"]:
@@ -4141,18 +4349,22 @@ def marketplace_status_text(for_chat_id: int | None = None) -> str:
     return text
 
 
-def build_offer_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_accept_scan"), callback_data=f"claim:{public_id}")]])
+def build_offer_keyboard(public_id: str, chat_id: int | None = None, payload_type: str = "qr") -> InlineKeyboardMarkup:
+    label = tr_chat(chat_id, "btn_accept_scan") if payload_type == "qr" else tr_chat(chat_id, "btn_accept_access_token")
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=f"claim:{public_id}")]])
 
 
-def build_offer_text(public_id: str, daily_no: int, sender_rate: Decimal, receiver_rate: Decimal, expires_at: str, chat_id: int | None = None) -> str:
+def build_offer_text(public_id: str, daily_no: int, sender_rate: Decimal, receiver_rate: Decimal, expires_at: str, chat_id: int | None = None, payload_type: str = "qr") -> str:
+    is_access_token = payload_type in {"access_token", "text"}
+    offer_title_key = "offer_new_access_token" if is_access_token else "offer_new"
+    tap_key = "offer_tap_to_claim_access_token" if is_access_token else "offer_tap_to_claim"
     return (
-        f"{tr_chat(chat_id, 'offer_new')}\n"
+        f"{tr_chat(chat_id, offer_title_key)}\n"
         f"🆔 {tr_chat(chat_id, 'offer_id')}: {public_id}\n"
-        f"📷 {tr_chat(chat_id, 'caption_photo_today', daily_no=daily_no)}\n"
+        f"🛒 {tr_chat(chat_id, 'caption_photo_today', daily_no=daily_no)}\n"
         f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}\n"
         f"{tr_chat(chat_id, 'receiver_time_left_line', time_left=format_time_left_for_chat(chat_id, expires_at))}\n\n"
-        f"{tr_chat(chat_id, 'offer_tap_to_claim')}"
+        f"{tr_chat(chat_id, tap_key)}"
     )
 
 
@@ -4170,7 +4382,12 @@ def save_open_offer(
     sender_rate: Decimal,
     receiver_rate: Decimal,
     expires_at: str,
+    payload_type: str = "qr",
+    payload_text: str | None = None,
 ) -> None:
+    if payload_type == "text":
+        payload_type = "access_token"
+    payload_type = payload_type if payload_type in {"qr", "access_token"} else "qr"
     with get_conn() as conn:
         conn.execute(
             """
@@ -4178,8 +4395,9 @@ def save_open_offer(
                 public_id, date, daily_no, sender_chat_id, receiver_chat_id,
                 sender_message_id, receiver_message_id, generated_file_id,
                 qr_sha256, qr_data, status, created_at, processing_ms,
-                offer_state, offer_expires_at, sender_rate_usdt, receiver_rate_usdt, reserved_usdt
-            ) VALUES (?, ?, ?, ?, 0, ?, NULL, ?, ?, ?, 'pending', ?, ?, 'open', ?, ?, ?, ?)
+                offer_state, offer_expires_at, sender_rate_usdt, receiver_rate_usdt, reserved_usdt,
+                payload_type, payload_text
+            ) VALUES (?, ?, ?, ?, 0, ?, NULL, ?, ?, ?, 'pending', ?, ?, 'open', ?, ?, ?, ?, ?, ?)
             """,
             (
                 public_id,
@@ -4196,6 +4414,8 @@ def save_open_offer(
                 float(sender_rate),
                 float(receiver_rate),
                 float(sender_rate),
+                payload_type,
+                payload_text,
             ),
         )
 
@@ -4262,6 +4482,23 @@ def list_claimed_qrs_needing_expiry_warning(now_value: str | datetime | None = N
     return due_rows[: max(1, int(limit or 100))]
 
 
+def list_claimed_orders_for_timer_refresh(limit: int = 100) -> list[sqlite3.Row]:
+    fetch_limit = max(1, int(limit or 100))
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM photos
+            WHERE status = 'pending'
+              AND offer_state = 'claimed'
+              AND receiver_chat_id IS NOT NULL
+              AND receiver_chat_id != 0
+              AND offer_expires_at IS NOT NULL
+            ORDER BY offer_expires_at ASC LIMIT ?
+            """,
+            (fetch_limit,),
+        ).fetchall()
+
+
 def mark_receiver_expiry_warning_sent(public_id: str) -> bool:
     with get_conn() as conn:
         cur = conn.execute(
@@ -4323,6 +4560,302 @@ def set_offer_notification_state(public_id: str, receiver_chat_id: int | None, s
             conn.execute("UPDATE offer_notifications SET state = ?, updated_at = ? WHERE public_id = ? AND receiver_chat_id = ?", (state, now_iso(), public_id, receiver_chat_id))
 
 
+def _access_token_key_secret() -> bytes:
+    seed = ADMIN_SESSION_SECRET or BOT_TOKEN or ADMIN_PANEL_PASSWORD or "upi-autopay-local-key"
+    return hashlib.sha256(seed.encode("utf-8")).digest()
+
+
+def _access_token_key_stream(nonce: bytes, length: int) -> bytes:
+    secret = _access_token_key_secret()
+    output = bytearray()
+    counter = 0
+    while len(output) < length:
+        output.extend(hmac.new(secret, nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest())
+        counter += 1
+    return bytes(output[:length])
+
+
+def encrypt_access_token_key(plain: str) -> str:
+    data = str(plain or "").encode("utf-8")
+    nonce = secrets.token_bytes(16)
+    stream = _access_token_key_stream(nonce, len(data))
+    cipher = bytes(a ^ b for a, b in zip(data, stream))
+    tag = hmac.new(_access_token_key_secret(), nonce + cipher, hashlib.sha256).digest()[:16]
+    return f"v1:{nonce.hex()}:{cipher.hex()}:{tag.hex()}"
+
+
+def decrypt_access_token_key(ciphertext: str) -> str:
+    value = str(ciphertext or "")
+    if not value.startswith("v1:"):
+        return value
+    try:
+        _version, nonce_hex, cipher_hex, tag_hex = value.split(":", 3)
+        nonce = bytes.fromhex(nonce_hex)
+        cipher = bytes.fromhex(cipher_hex)
+        tag = bytes.fromhex(tag_hex)
+    except Exception as exc:
+        raise ValueError("Invalid encrypted access key") from exc
+    expected = hmac.new(_access_token_key_secret(), nonce + cipher, hashlib.sha256).digest()[:16]
+    if not hmac.compare_digest(tag, expected):
+        raise ValueError("Access key encryption check failed")
+    stream = _access_token_key_stream(nonce, len(cipher))
+    return bytes(a ^ b for a, b in zip(cipher, stream)).decode("utf-8")
+
+
+def access_token_key_hash(plain: str) -> str:
+    return hashlib.sha256(str(plain or "").strip().encode("utf-8")).hexdigest()
+
+
+def mask_access_token_key(plain: str) -> str:
+    value = str(plain or "")
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def access_token_key_counts() -> dict[str, int]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT status, COUNT(*) AS n FROM access_token_keys GROUP BY status").fetchall()
+    counts = {str(row["status"]): int(row["n"] or 0) for row in rows}
+    for status in ("available", "reserved", "used", "review", "removed"):
+        counts.setdefault(status, 0)
+    counts["total_active"] = counts["available"] + counts["reserved"] + counts["used"] + counts["review"]
+    return counts
+
+
+def available_access_token_key_count() -> int:
+    return access_token_key_counts().get("available", 0)
+
+
+def open_access_token_offer_count() -> int:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM photos
+            WHERE status = 'pending'
+              AND offer_state = 'open'
+              AND payload_type IN ('access_token','text')
+            """
+        ).fetchone()
+    return int(row["n"] or 0) if row else 0
+
+
+def access_token_scans_available_count() -> int:
+    outstanding = open_access_token_offer_count()
+    return max(0, min(total_marketplace_capacity(), available_access_token_key_count()) - outstanding)
+
+
+def mark_access_token_waiting(chat_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO access_token_waitlist(chat_id, created_at, notified_at)
+            VALUES (?, ?, NULL)
+            ON CONFLICT(chat_id) DO UPDATE SET notified_at = NULL
+            """,
+            (int(chat_id), now_iso()),
+        )
+
+
+def reserve_access_token_key_for_claim(conn: sqlite3.Connection, public_id: str, receiver_chat_id: int) -> bool:
+    row = conn.execute(
+        "SELECT id FROM access_token_keys WHERE status = 'available' ORDER BY id ASC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return False
+    cur = conn.execute(
+        """
+        UPDATE access_token_keys
+        SET status = 'reserved', assigned_public_id = ?, assigned_receiver_chat_id = ?, reserved_at = ?
+        WHERE id = ? AND status = 'available'
+        """,
+        (public_id, int(receiver_chat_id), now_iso(), int(row["id"])),
+    )
+    return cur.rowcount > 0
+
+
+def assigned_access_token_key(public_id: str) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM access_token_keys WHERE assigned_public_id = ? ORDER BY id DESC LIMIT 1",
+            (str(public_id),),
+        ).fetchone()
+
+
+def assigned_access_token_key_plain(public_id: str) -> str | None:
+    row = assigned_access_token_key(public_id)
+    if not row:
+        return None
+    return decrypt_access_token_key(str(row["key_ciphertext"]))
+
+
+def mark_access_token_key_sent(public_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE access_token_keys SET sent_at = COALESCE(sent_at, ?) WHERE assigned_public_id = ? AND status = 'reserved'",
+            (now_iso(), str(public_id)),
+        )
+
+
+async def deliver_access_token_key_to_receiver(bot, public_id: str, receiver_chat_id: int, *, force: bool = False) -> bool:
+    key_row = assigned_access_token_key(public_id)
+    if not key_row:
+        return False
+    if key_row["sent_at"] and not force:
+        return True
+    try:
+        key_plain = decrypt_access_token_key(str(key_row["key_ciphertext"]))
+    except Exception as exc:
+        logger.warning("Could not decrypt Access Token key for %s: %s", public_id, exc)
+        return False
+
+    try:
+        await bot.send_message(
+            chat_id=receiver_chat_id,
+            text=tr_chat(receiver_chat_id, "access_token_key_delivery", key=html.escape(key_plain)),
+            parse_mode="HTML",
+            protect_content=PROTECT_CONTENT,
+        )
+        mark_access_token_key_sent(public_id)
+        return True
+    except TelegramError as exc:
+        logger.warning("Could not deliver formatted Access Token key for %s to %s: %s", public_id, receiver_chat_id, exc)
+
+    try:
+        await bot.send_message(
+            chat_id=receiver_chat_id,
+            text=(
+                "Access key for this Access Token order:\n"
+                f"{key_plain}\n\n"
+                "Use it once only. This key will be marked used when you tap Done."
+            ),
+            protect_content=PROTECT_CONTENT,
+        )
+        mark_access_token_key_sent(public_id)
+        return True
+    except TelegramError as exc:
+        logger.warning("Could not deliver plain Access Token key for %s to %s: %s", public_id, receiver_chat_id, exc)
+        return False
+
+
+def finalize_access_token_key_for_order(public_id: str, status: str) -> None:
+    target = "used" if str(status).lower() == "done" else "review"
+    timestamp_col = "used_at" if target == "used" else "review_at"
+    with get_conn() as conn:
+        conn.execute(
+            f"""
+            UPDATE access_token_keys
+            SET status = ?, {timestamp_col} = COALESCE({timestamp_col}, ?)
+            WHERE assigned_public_id = ?
+              AND status = 'reserved'
+            """,
+            (target, now_iso(), str(public_id)),
+        )
+
+
+def bulk_add_access_token_keys(raw_text: str, note: str = "") -> tuple[int, int, int]:
+    keys = [line.strip() for line in str(raw_text or "").splitlines()]
+    added = duplicates = skipped = 0
+    with get_conn() as conn:
+        for plain in keys:
+            if not plain:
+                skipped += 1
+                continue
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO access_token_keys(key_ciphertext, key_hash, status, added_at, note)
+                    VALUES (?, ?, 'available', ?, ?)
+                    """,
+                    (encrypt_access_token_key(plain), access_token_key_hash(plain), now_iso(), note.strip() or None),
+                )
+                added += 1
+            except sqlite3.IntegrityError:
+                duplicates += 1
+    return added, duplicates, skipped
+
+
+def list_access_token_keys(limit: int = 500) -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM access_token_keys ORDER BY id DESC LIMIT ?",
+            (max(1, int(limit or 500)),),
+        ).fetchall()
+
+
+def remove_access_token_key(key_id: int) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE access_token_keys
+            SET status = 'removed', removed_at = COALESCE(removed_at, ?)
+            WHERE id = ? AND status IN ('available','review','removed')
+            """,
+            (now_iso(), int(key_id)),
+        )
+        return cur.rowcount > 0
+
+
+def restore_access_token_key(key_id: int) -> bool:
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE access_token_keys
+            SET status = 'available', assigned_public_id = NULL, assigned_receiver_chat_id = NULL,
+                reserved_at = NULL, sent_at = NULL, used_at = NULL, review_at = NULL, removed_at = NULL
+            WHERE id = ? AND status IN ('review','removed')
+            """,
+            (int(key_id),),
+        )
+        return cur.rowcount > 0
+
+
+async def notify_admins_low_access_token_keys(bot) -> None:
+    count = available_access_token_key_count()
+    if count >= ACCESS_TOKEN_KEY_LOW_THRESHOLD:
+        return
+    last = get_admin_setting("access_token_key_low_notified_at")
+    if last and seconds_since_iso(last) < ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS:
+        return
+    set_admin_setting("access_token_key_low_notified_at", now_iso())
+    for admin_id in sorted(ADMIN_IDS):
+        try:
+            await bot.send_message(
+                chat_id=int(admin_id),
+                text=f"Access Token key pool is low: {count} available.",
+                protect_content=PROTECT_CONTENT,
+            )
+        except TelegramError as exc:
+            logger.warning("Could not notify admin %s about low Access Token keys: %s", admin_id, exc)
+
+
+async def notify_access_token_waitlist_if_available(bot) -> tuple[int, int]:
+    count = access_token_scans_available_count()
+    if count <= 0:
+        return 0, 0
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT chat_id FROM access_token_waitlist WHERE notified_at IS NULL ORDER BY created_at ASC LIMIT 200"
+        ).fetchall()
+    sent = failed = 0
+    for row in rows:
+        chat_id = int(row["chat_id"])
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=tr_chat(chat_id, "access_token_scans_available", count=count),
+                protect_content=PROTECT_CONTENT,
+            )
+            sent += 1
+        except TelegramError as exc:
+            logger.warning("Could not notify Access Token waitlist user %s: %s", chat_id, exc)
+            failed += 1
+        with get_conn() as conn:
+            conn.execute("UPDATE access_token_waitlist SET notified_at = ? WHERE chat_id = ?", (now_iso(), chat_id))
+    return sent, failed
+
+
 def claim_offer_in_db(public_id: str, receiver_chat_id: int) -> tuple[bool, str, sqlite3.Row | None, bool]:
     with get_conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -4350,6 +4883,10 @@ def claim_offer_in_db(public_id: str, receiver_chat_id: int) -> tuple[bool, str,
         if iso_is_due(row["offer_expires_at"]):
             conn.rollback()
             return False, "Offer expired.", row, False
+        if order_payload_type(row) == "access_token":
+            if not reserve_access_token_key_for_claim(conn, public_id, receiver_chat_id):
+                conn.rollback()
+                return False, "claim_no_access_token_key", row, False
         remaining_before = int(presence["limit_remaining"] or 0)
         remaining_after = max(0, remaining_before - 1)
         auto_off = remaining_after <= 0
@@ -7665,20 +8202,137 @@ async def delete_original_sender_message_safely(
 def build_caption(date_str: str, daily_no: int, public_id: str, chat_id: int | None = None) -> str:
     return (
         f"📅 {tr_chat(chat_id, 'caption_date')}: {display_date(date_str)}\n"
-        f"📷 {tr_chat(chat_id, 'caption_photo_today', daily_no=daily_no)}\n"
+        f"🛒 {tr_chat(chat_id, 'caption_photo_today', daily_no=daily_no)}\n"
         f"🆔 {tr_chat(chat_id, 'caption_id')}: {public_id}"
     )
+
+
+def order_payload_type(row) -> str:
+    try:
+        value = str(row["payload_type"] or "").strip().lower()
+    except Exception:
+        value = ""
+    if value == "text":
+        return "access_token"
+    return value if value in {"qr", "access_token"} else "qr"
+
+
+def method_label(payload_type: str, chat_id: int | None = None) -> str:
+    if payload_type in {"access_token", "text"}:
+        return "Access Token"
+    return "QR"
+
+
+def build_send_method_keyboard(chat_id: int | None = None) -> InlineKeyboardMarkup:
+    settings = get_marketplace_settings()
+    qr_sender_rate, _qr_receiver_rate = marketplace_rates_for_payload("qr", settings)
+    access_token_sender_rate, _access_token_receiver_rate = marketplace_rates_for_payload("access_token", settings)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"QR - ${_money(qr_sender_rate)} USDT", callback_data="sendmethod:qr")],
+            [InlineKeyboardButton(f"Access Token - ${_money(access_token_sender_rate)} USDT", callback_data="sendmethod:access_token")],
+        ]
+    )
+
+
+async def edit_order_message(
+    bot,
+    *,
+    chat_id: int,
+    message_id: int | None,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = None,
+) -> bool:
+    if not message_id:
+        return False
+    try:
+        await bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+        return True
+    except TelegramError:
+        pass
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+        return True
+    except TelegramError as exc:
+        logger.warning("Could not edit order message %s/%s: %s", chat_id, message_id, exc)
+        return False
+
+
+async def edit_order_reply_markup(
+    bot,
+    *,
+    chat_id: int,
+    message_id: int | None,
+    reply_markup: InlineKeyboardMarkup | None,
+) -> bool:
+    if not message_id:
+        return False
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=reply_markup,
+        )
+        return True
+    except TelegramError as exc:
+        if "message is not modified" in str(exc).lower():
+            return True
+        logger.warning("Could not edit order reply markup %s/%s: %s", chat_id, message_id, exc)
+        return False
+
+
+def receiver_order_timer_lines(expires_at: str | None, chat_id: int | None = None, payload_type: str = "qr") -> list[str]:
+    if not expires_at:
+        return []
+    hint_key = "receiver_access_token_timer_hint" if payload_type in {"access_token", "text"} else "receiver_qr_timer_hint"
+    return [
+        f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}",
+        tr_chat(chat_id, "receiver_time_left_line", time_left=format_time_left_for_chat(chat_id, expires_at)),
+        tr_chat(chat_id, hint_key),
+    ]
 
 
 def build_receiver_qr_caption(date_str: str, daily_no: int, public_id: str, expires_at: str | None = None, chat_id: int | None = None) -> str:
     lines = [build_caption(date_str, daily_no, public_id, chat_id)]
     if expires_at:
-        lines.extend([
-            "",
-            f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}",
-            tr_chat(chat_id, "receiver_time_left_line", time_left=format_time_left_for_chat(chat_id, expires_at)),
-            tr_chat(chat_id, "receiver_qr_timer_hint"),
-        ])
+        lines.extend(["", *receiver_order_timer_lines(expires_at, chat_id, "qr")])
+    return "\n".join(lines)
+
+
+def access_token_pre_block(label: str, value: str) -> str:
+    return f"{label}:\n<pre>{html.escape(str(value or '').strip())}</pre>"
+
+
+def build_receiver_access_token_message(row: sqlite3.Row, chat_id: int | None = None) -> str:
+    text = str(row["payload_text"] or "").strip()
+    expires_at = str(row["offer_expires_at"] or "")
+    lines = [
+        build_caption(str(row["date"]), int(row["daily_no"]), str(row["public_id"]), chat_id),
+        "",
+        access_token_pre_block("Access Token", text),
+    ]
+    try:
+        key_plain = assigned_access_token_key_plain(str(row["public_id"]))
+    except Exception as exc:
+        logger.warning("Could not add assigned Access Token key to receiver message for %s: %s", row["public_id"], exc)
+        key_plain = None
+    if key_plain:
+        lines.extend(["", access_token_pre_block("Access Key", key_plain)])
+    if expires_at:
+        lines.extend(["", *receiver_order_timer_lines(expires_at, chat_id, "access_token")])
     return "\n".join(lines)
 
 
@@ -7719,26 +8373,122 @@ def build_sender_offer_caption(
     return "\n".join(lines)
 
 
+def build_sender_access_token_offer_message(
+    date_str: str,
+    daily_no: int,
+    public_id: str,
+    status_line: str,
+    payload_text: str,
+    *,
+    expires_at: str | None = None,
+    sender_rate: Decimal | str | float | int | None = None,
+    order_row=None,
+    chat_id: int | None = None,
+) -> str:
+    lines = [
+        build_caption(date_str, daily_no, public_id, chat_id),
+        "",
+        access_token_pre_block("Access Token", payload_text),
+        "",
+        status_line,
+    ]
+    if expires_at:
+        lines.extend([
+            f"⏱ {tr_chat(chat_id, 'caption_expires')}: {display_datetime(expires_at)}",
+            tr_chat(chat_id, "receiver_time_left_line", time_left=format_time_left_for_chat(chat_id, expires_at)),
+        ])
+    if sender_rate is not None or order_row is not None:
+        reserved_amount = effective_sender_reserved_display(order_row, sender_rate)
+        lines.append(f"💳 {tr_chat(chat_id, 'caption_reserved')}: ${_money(reserved_amount)} USDT")
+    return "\n".join(lines)
+
+
 async def edit_sender_offer_caption(
     bot,
     chat_id: int,
     message_id: int | None,
     caption: str,
     reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = None,
+) -> bool:
+    return await edit_order_message(
+        bot,
+        chat_id=chat_id,
+        message_id=message_id,
+        text=caption,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+
+
+async def edit_sender_access_token_order_message(
+    bot,
+    chat_id: int,
+    message_id: int | None,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
 ) -> bool:
     if not message_id:
         return False
     try:
-        await bot.edit_message_caption(
+        await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            caption=caption,
+            text=text,
+            parse_mode="HTML",
             reply_markup=reply_markup,
         )
         return True
     except TelegramError as exc:
-        logger.warning("Could not edit sender offer caption %s/%s: %s", chat_id, message_id, exc)
+        if "message is not modified" in str(exc).lower():
+            return await edit_order_reply_markup(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=reply_markup,
+            )
+        logger.warning("Could not edit sender Access Token message %s/%s: %s", chat_id, message_id, exc)
+        return await edit_order_reply_markup(
+            bot,
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=reply_markup,
+        )
+
+
+async def edit_receiver_access_token_order_message(
+    bot,
+    chat_id: int,
+    message_id: int | None,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> bool:
+    if not message_id:
         return False
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+        return True
+    except TelegramError as exc:
+        if "message is not modified" in str(exc).lower():
+            return await edit_order_reply_markup(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=reply_markup,
+            )
+        logger.warning("Could not edit receiver Access Token message %s/%s: %s", chat_id, message_id, exc)
+        return await edit_order_reply_markup(
+            bot,
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=reply_markup,
+        )
 
 
 def receiver_status_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
@@ -7760,13 +8510,35 @@ def qr_dispute_keyboard(public_id: str, chat_id: int | None = None) -> InlineKey
     )
 
 
-def failure_reason_keyboard(public_id: str, chat_id: int | None = None) -> InlineKeyboardMarkup:
-    label_keys = {
-        "qr_not_working": "fail_reason_qr_not_working",
-        "qr_expired": "fail_reason_qr_expired",
-        "limit_over": "fail_reason_limit_over",
-    }
-    rows = [[InlineKeyboardButton(tr_chat(chat_id, label_keys.get(key, key)), callback_data=f"failreason:{public_id}:{key}")] for key, _label in FAIL_REASON_BUTTONS]
+def failure_reason_label_key(reason_key: str, payload_type: str = "qr") -> str:
+    if payload_type == "access_token":
+        label_keys = {
+            "qr_not_working": "fail_reason_access_token_invalid",
+            "qr_expired": "fail_reason_access_token_expired",
+            "limit_over": "fail_reason_access_token_limit_over",
+        }
+    else:
+        label_keys = {
+            "qr_not_working": "fail_reason_qr_not_working",
+            "qr_expired": "fail_reason_qr_expired",
+            "limit_over": "fail_reason_limit_over",
+        }
+    return label_keys.get(reason_key, reason_key)
+
+
+def failure_reason_text(reason_key: str, payload_type: str = "qr") -> str | None:
+    if payload_type == "access_token":
+        choices = {
+            "qr_not_working": "Access Token is invalid",
+            "qr_expired": "Access Token expired",
+            "limit_over": "My limit is over",
+        }
+        return choices.get(reason_key)
+    return FAIL_REASON_CHOICES.get(reason_key)
+
+
+def failure_reason_keyboard(public_id: str, chat_id: int | None = None, payload_type: str = "qr") -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(tr_chat(chat_id, failure_reason_label_key(key, payload_type)), callback_data=f"failreason:{public_id}:{key}")] for key, _label in FAIL_REASON_BUTTONS]
     rows.append([InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:home")])
     return InlineKeyboardMarkup(rows)
 
@@ -8070,7 +8842,7 @@ def _receiver_pending_text_keyboard(chat_id: int) -> tuple[str, InlineKeyboardMa
     keyboard: list[list[InlineKeyboardButton]] = []
     for row in rows:
         public_id = str(row["public_id"])
-        lines.append(f"{public_id} | 📷 {tr_chat(chat_id, 'caption_photo_today', daily_no=row['daily_no'])} | 📅 {display_date(row['date'])}")
+        lines.append(f"{public_id} | 🛒 {tr_chat(chat_id, 'caption_photo_today', daily_no=row['daily_no'])} | 📅 {display_date(row['date'])}")
         keyboard.append([InlineKeyboardButton(public_id, callback_data=f"pendingqr:{public_id}")])
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
 
@@ -8596,6 +9368,9 @@ async def on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         key="notify_receiver_online",
         capacity=total_marketplace_capacity(),
     )
+    wait_sent, wait_failed = await notify_access_token_waitlist_if_available(context.bot)
+    if wait_sent or wait_failed:
+        logger.info("Access Token waitlist notified after receiver online: sent=%s failed=%s", wait_sent, wait_failed)
     logger.info("Receiver %s online; notified senders sent=%s failed=%s", chat_id, sent, failed)
 
 
@@ -8689,6 +9464,7 @@ WITHDRAW_FLOW: dict[int, dict] = {}
 DISPUTE_FLOW: dict[int, dict] = {}
 DISPUTE_REPLY_FLOW: dict[int, dict] = {}
 FAIL_REASON_FLOW: dict[int, dict] = {}
+SEND_FLOW: dict[int, dict] = {}
 FAIL_REASON_CHOICES: dict[str, str] = {
     "qr_not_working": "QR not working",
     "qr_expired": "QR expired",
@@ -9384,6 +10160,7 @@ async def wallet_nav_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         DISPUTE_FLOW.pop(chat_id, None)
         DISPUTE_REPLY_FLOW.pop(chat_id, None)
         FAIL_REASON_FLOW.pop(chat_id, None)
+        SEND_FLOW.pop(chat_id, None)
         await query.edit_message_text(
             main_menu_text(user, chat_id),
             parse_mode="HTML",
@@ -9661,6 +10438,176 @@ async def manual_payment_button(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
+async def send_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    observe_telegram_profile(update.effective_user)
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    user = get_user_for_chat(chat_id)
+    if not can_use_sender_features(chat_id, user):
+        await update.message.reply_text(tr_chat(chat_id, "only_active_sender_photos"))
+        return
+    await update.message.reply_text(
+        tr_chat(chat_id, "send_choose_method"),
+        reply_markup=build_send_method_keyboard(chat_id),
+    )
+
+
+async def send_method_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query or not query.message:
+        return
+    chat_id = query.message.chat.id
+    user = get_user_for_chat(chat_id)
+    if not can_use_sender_features(chat_id, user):
+        await query.answer(tr_chat(chat_id, "only_active_sender_photos"), show_alert=True)
+        return
+    method = (query.data or "").split(":", 1)[1].strip().lower() if ":" in (query.data or "") else ""
+    if method == "text":
+        method = "access_token"
+    if method not in {"qr", "access_token"}:
+        await query.answer(tr_chat(chat_id, "send_invalid_method"), show_alert=True)
+        return
+    SEND_FLOW[chat_id] = {"method": method}
+    await query.answer()
+    prompt = tr_chat(chat_id, "send_qr_prompt") if method == "qr" else tr_chat(chat_id, "send_access_token_prompt")
+    await query.edit_message_text(
+        prompt,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(tr_chat(chat_id, "btn_cancel"), callback_data="nav:home")]]),
+    )
+
+
+async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.effective_chat:
+        return
+    chat_id = update.effective_chat.id
+    had_flow = False
+    for flow in (SEND_FLOW, DISPUTE_FLOW, DISPUTE_REPLY_FLOW, WITHDRAW_FLOW, MANUAL_TXHASH_FLOW, WALLET_TOPUP_FLOW, FAIL_REASON_FLOW):
+        if chat_id in flow:
+            flow.pop(chat_id, None)
+            had_flow = True
+    await update.message.reply_text(tr_chat(chat_id, "send_flow_cancelled") if had_flow else tr_chat(chat_id, "send_flow_cancelled"))
+
+
+async def create_access_token_offer_from_message(message, context: ContextTypes.DEFAULT_TYPE, chat_id: int, payload_text: str) -> None:
+    user = get_user_for_chat(chat_id)
+    if not can_use_sender_features(chat_id, user):
+        await message.reply_text(tr_chat(chat_id, "only_active_sender_photos"))
+        return
+
+    payload_text = str(payload_text or "").strip()
+    if len(payload_text) < 2:
+        await message.reply_text(tr_chat(chat_id, "access_token_too_short"))
+        return
+    if len(payload_text) > 3500:
+        await message.reply_text(tr_chat(chat_id, "access_token_too_long"))
+        return
+
+    settings = get_marketplace_settings()
+    if settings["maintenance_mode"]:
+        await message.reply_text(tr_chat(chat_id, "maintenance_paused"))
+        return
+
+    await notify_admins_low_access_token_keys(context.bot)
+    if access_token_scans_available_count() <= 0:
+        mark_access_token_waiting(chat_id)
+        await message.reply_text(tr_chat(chat_id, "access_token_scans_unavailable"))
+        return
+
+    sender_rate, receiver_rate = marketplace_rates_for_payload("access_token", settings)
+    if sender_rate > 0 and available_sender_balance(chat_id) < sender_rate:
+        await message.reply_text(
+            tr_chat(chat_id, "insufficient_wallet", required=_money(sender_rate), available=_money(available_sender_balance(chat_id)))
+        )
+        return
+
+    started_at = time.perf_counter()
+    date_str = today_str()
+    daily_no = reserve_daily_number(date_str)
+    public_id = f"{date_str}-{daily_no:04d}"
+    qr_expire_minutes = int(settings["access_token_expire_minutes"])
+    expires_at = datetime.fromtimestamp(now_dt().timestamp() + max(1, qr_expire_minutes) * 60, ZoneInfo(BOT_TZ)).isoformat(timespec="seconds")
+
+    ok, _reserve_msg = reserve_sender_funds(chat_id, sender_rate, public_id)
+    if not ok:
+        await message.reply_text(
+            tr_chat(chat_id, "insufficient_wallet", required=_money(sender_rate), available=_money(available_sender_balance(chat_id)))
+        )
+        return
+
+    processing_ms = int((time.perf_counter() - started_at) * 1000)
+    caption = build_sender_access_token_offer_message(
+        date_str,
+        daily_no,
+        public_id,
+        tr_chat(chat_id, "sender_offer_created"),
+        payload_text,
+        expires_at=expires_at,
+        sender_rate=sender_rate,
+        chat_id=chat_id,
+    )
+    try:
+        sender_msg = await context.bot.send_message(
+            chat_id=chat_id,
+            text=caption,
+            parse_mode="HTML",
+            protect_content=PROTECT_CONTENT,
+        )
+    except TelegramError as exc:
+        release_sender_reserve(chat_id, sender_rate, public_id, "Sender Access Token delivery failed")
+        logger.warning("Telegram Access Token send failed: %s", exc)
+        await message.reply_text(tr_chat(chat_id, "access_token_send_failed"))
+        return
+
+    save_open_offer(
+        public_id=public_id,
+        date_str=date_str,
+        daily_no=daily_no,
+        sender_chat_id=chat_id,
+        sender_message_id=sender_msg.message_id,
+        generated_file_id="",
+        qr_sha256=hashlib.sha256(payload_text.encode("utf-8")).hexdigest(),
+        qr_data=None,
+        processing_ms=processing_ms,
+        sender_rate=sender_rate,
+        receiver_rate=receiver_rate,
+        expires_at=expires_at,
+        payload_type="access_token",
+        payload_text=payload_text,
+    )
+    schedule_qr_expiry_task(context.application, public_id, expires_at)
+
+    sent, failed = await send_offer_to_receivers(context, public_id)
+    if sent <= 0:
+        expire_offer_in_db(public_id, "expired")
+        release_sender_reserve(chat_id, sender_rate, public_id, "No receiver could be notified")
+        await edit_sender_offer_caption(
+            context.bot,
+            chat_id,
+            sender_msg.message_id,
+            build_sender_offer_caption(date_str, daily_no, public_id, tr_chat(chat_id, "offer_failed_no_receiver"), chat_id=chat_id),
+        )
+    else:
+        await edit_sender_access_token_order_message(
+            context.bot,
+            chat_id,
+            sender_msg.message_id,
+            build_sender_access_token_offer_message(
+                date_str,
+                daily_no,
+                public_id,
+                tr_chat(chat_id, "sender_offer_sent"),
+                payload_text,
+                expires_at=expires_at,
+                sender_rate=sender_rate,
+                chat_id=chat_id,
+            ),
+            reply_markup=sender_open_offer_keyboard(public_id, chat_id),
+        )
+        schedule_open_offer_timer_refresh_task(context.application, public_id)
+    await delete_original_sender_message_safely(context, chat_id, message.message_id)
+
+
 async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.effective_chat or not update.message.text:
         return
@@ -9687,6 +10634,19 @@ async def wallet_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         amount = _dec(text, "-1")
         await submit_withdraw_amount(update.message, chat_id, amount)
         return
+    if chat_id in SEND_FLOW:
+        state = SEND_FLOW.get(chat_id) or {}
+        method = str(state.get("method") or "").lower()
+        if method in {"access_token", "text"}:
+            SEND_FLOW.pop(chat_id, None)
+            await create_access_token_offer_from_message(update.message, context, chat_id, text)
+            return
+        if method == "qr":
+            await update.message.reply_text(tr_chat(chat_id, "qr_text_wrong_mode"))
+            return
+        if method == "qr":
+            await update.message.reply_text("Please send the QR as a photo.")
+            return
     if chat_id in MANUAL_TXHASH_FLOW:
         state = MANUAL_TXHASH_FLOW.get(chat_id) or {}
         if state.get("step") == "screenshot":
@@ -10294,6 +11254,224 @@ def schedule_qr_expiry_task(application: Application | None, public_id: str, exp
         logger.exception("Could not schedule QR expiry task for %s", public_id)
 
 
+async def refresh_open_offer_timer_after_delay(application: Application, public_id: str) -> None:
+    interval = max(1, OFFER_TIMER_REFRESH_SECONDS)
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            row = get_photo_record(public_id)
+            if not row:
+                return
+            if str(row["status"] or "").lower() != "pending" or str(row["offer_state"] or "").lower() != "open":
+                return
+            if iso_is_due(row["offer_expires_at"]):
+                return
+            payload_type = order_payload_type(row)
+            text_args = (
+                public_id,
+                int(row["daily_no"]),
+                effective_sender_charge_amount(row, use_current_setting_if_missing=True),
+                _dec(row["receiver_rate_usdt"]),
+                str(row["offer_expires_at"] or ""),
+            )
+            sender_chat_id = int(row["sender_chat_id"] or 0)
+            sender_message_id = int(row["sender_message_id"] or 0)
+            if sender_chat_id > 0 and sender_message_id > 0:
+                if payload_type == "access_token":
+                    sender_text = build_sender_access_token_offer_message(
+                        str(row["date"]),
+                        int(row["daily_no"]),
+                        public_id,
+                        tr_chat(sender_chat_id, "sender_offer_sent"),
+                        str(row["payload_text"] or "").strip(),
+                        expires_at=str(row["offer_expires_at"] or ""),
+                        sender_rate=effective_sender_charge_amount(row, use_current_setting_if_missing=True),
+                        order_row=row,
+                        chat_id=sender_chat_id,
+                    )
+                    await edit_sender_access_token_order_message(
+                        application.bot,
+                        sender_chat_id,
+                        sender_message_id,
+                        sender_text,
+                        reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
+                    )
+                else:
+                    sender_text = build_sender_offer_caption(
+                        str(row["date"]),
+                        int(row["daily_no"]),
+                        public_id,
+                        tr_chat(sender_chat_id, "sender_offer_sent"),
+                        expires_at=str(row["offer_expires_at"] or ""),
+                        sender_rate=effective_sender_charge_amount(row, use_current_setting_if_missing=True),
+                        order_row=row,
+                        chat_id=sender_chat_id,
+                    )
+                    await edit_sender_offer_caption(
+                        application.bot,
+                        sender_chat_id,
+                        sender_message_id,
+                        sender_text,
+                        reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
+                    )
+            for note in offer_notifications(public_id):
+                if str(note["state"] or "").lower() != "sent":
+                    continue
+                receiver_chat_id = int(note["receiver_chat_id"])
+                try:
+                    current = get_photo_record(public_id)
+                    if not current or str(current["status"] or "").lower() != "pending" or str(current["offer_state"] or "").lower() != "open":
+                        return
+                    await application.bot.edit_message_text(
+                        chat_id=receiver_chat_id,
+                        message_id=int(note["message_id"]),
+                        text=build_offer_text(*text_args, chat_id=receiver_chat_id, payload_type=payload_type),
+                        reply_markup=build_offer_keyboard(public_id, receiver_chat_id, payload_type),
+                    )
+                    await asyncio.sleep(0.02)
+                except TelegramError as exc:
+                    if "message is not modified" not in str(exc).lower():
+                        logger.debug("Could not refresh offer timer %s for %s: %s", public_id, receiver_chat_id, exc)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Offer timer refresh task failed for %s", public_id)
+
+
+def schedule_open_offer_timer_refresh_task(application: Application | None, public_id: str) -> None:
+    if application is None:
+        return
+    try:
+        application.create_task(
+            refresh_open_offer_timer_after_delay(application, public_id),
+            name=f"offer_timer_refresh_{public_id}",
+        )
+    except TypeError:
+        application.create_task(refresh_open_offer_timer_after_delay(application, public_id))
+    except Exception:
+        logger.exception("Could not schedule offer timer refresh task for %s", public_id)
+
+
+async def refresh_claimed_order_timer_once(bot, public_id: str, row: sqlite3.Row | None = None) -> bool:
+    row = row or get_photo_record(public_id)
+    if not row:
+        return False
+    if str(row["status"] or "").lower() != "pending" or str(row["offer_state"] or "").lower() != "claimed":
+        return False
+    if iso_is_due(row["offer_expires_at"]):
+        return False
+
+    receiver_chat_id = int(row["receiver_chat_id"] or 0)
+    receiver_message_id = int(row["receiver_message_id"] or 0)
+    sender_chat_id = int(row["sender_chat_id"] or 0)
+    sender_message_id = int(row["sender_message_id"] or 0)
+    if (receiver_chat_id <= 0 or receiver_message_id <= 0) and (sender_chat_id <= 0 or sender_message_id <= 0):
+        return False
+
+    payload_type = order_payload_type(row)
+    if receiver_chat_id > 0 and receiver_message_id > 0:
+        if payload_type == "access_token":
+            await edit_receiver_access_token_order_message(
+                bot,
+                receiver_chat_id,
+                receiver_message_id,
+                build_receiver_access_token_message(row, receiver_chat_id),
+                reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+            )
+        else:
+            try:
+                await bot.edit_message_caption(
+                    chat_id=receiver_chat_id,
+                    message_id=receiver_message_id,
+                    caption=build_receiver_qr_caption(
+                        str(row["date"]),
+                        int(row["daily_no"]),
+                        public_id,
+                        str(row["offer_expires_at"] or ""),
+                        receiver_chat_id,
+                    ),
+                    reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                )
+            except TelegramError as exc:
+                if "message is not modified" not in str(exc).lower():
+                    logger.debug("Could not refresh receiver QR timer %s for %s: %s", public_id, receiver_chat_id, exc)
+                await edit_order_reply_markup(
+                    bot,
+                    chat_id=receiver_chat_id,
+                    message_id=receiver_message_id,
+                    reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                )
+
+    if sender_chat_id > 0 and sender_message_id > 0:
+        sender_status_key = "sender_access_token_offer_accepted" if payload_type == "access_token" else "sender_offer_accepted"
+        if payload_type == "access_token":
+            sender_text = build_sender_access_token_offer_message(
+                str(row["date"]),
+                int(row["daily_no"]),
+                public_id,
+                tr_chat(sender_chat_id, sender_status_key),
+                str(row["payload_text"] or "").strip(),
+                expires_at=str(row["offer_expires_at"] or ""),
+                sender_rate=effective_sender_reserved_display(row),
+                order_row=row,
+                chat_id=sender_chat_id,
+            )
+            await edit_sender_access_token_order_message(
+                bot,
+                sender_chat_id,
+                sender_message_id,
+                sender_text,
+                reply_markup=sender_notify_keyboard(public_id, sender_chat_id),
+            )
+        else:
+            sender_text = build_sender_offer_caption(
+                str(row["date"]),
+                int(row["daily_no"]),
+                public_id,
+                tr_chat(sender_chat_id, sender_status_key),
+                expires_at=str(row["offer_expires_at"] or ""),
+                sender_rate=effective_sender_reserved_display(row),
+                order_row=row,
+                chat_id=sender_chat_id,
+            )
+            await edit_sender_offer_caption(
+                bot,
+                sender_chat_id,
+                sender_message_id,
+                sender_text,
+                reply_markup=sender_notify_keyboard(public_id, sender_chat_id),
+            )
+    return True
+
+
+async def refresh_claimed_order_timer_after_delay(application: Application, public_id: str) -> None:
+    interval = max(1, OFFER_TIMER_REFRESH_SECONDS)
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            keep_refreshing = await refresh_claimed_order_timer_once(application.bot, public_id)
+            if not keep_refreshing:
+                return
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Claimed order timer refresh task failed for %s", public_id)
+
+
+def schedule_claimed_order_timer_refresh_task(application: Application | None, public_id: str) -> None:
+    if application is None:
+        return
+    try:
+        application.create_task(
+            refresh_claimed_order_timer_after_delay(application, public_id),
+            name=f"claimed_timer_refresh_{public_id}",
+        )
+    except TypeError:
+        application.create_task(refresh_claimed_order_timer_after_delay(application, public_id))
+    except Exception:
+        logger.exception("Could not schedule claimed timer refresh task for %s", public_id)
+
+
 async def send_receiver_expiry_warning(bot, row: sqlite3.Row) -> bool:
     public_id = str(row["public_id"])
     receiver_chat_id = int(row["receiver_chat_id"] or 0)
@@ -10362,6 +11540,7 @@ async def send_offer_to_receivers_by_bot(bot, public_id: str) -> tuple[int, int]
     receivers = online_receivers()
     if not receivers:
         return 0, 0
+    payload_type = order_payload_type(row)
 
     # Send offers concurrently. Sequential sends can waste several seconds when many
     # receivers are online, and mandate QRs are time-limited.
@@ -10373,8 +11552,8 @@ async def send_offer_to_receivers_by_bot(bot, public_id: str) -> tuple[int, int]
             try:
                 msg = await bot.send_message(
                     chat_id=receiver_chat_id,
-                    text=build_offer_text(public_id, int(row["daily_no"]), effective_sender_charge_amount(row, use_current_setting_if_missing=True), _dec(row["receiver_rate_usdt"]), str(row["offer_expires_at"]), receiver_chat_id),
-                    reply_markup=build_offer_keyboard(public_id, receiver_chat_id),
+                    text=build_offer_text(public_id, int(row["daily_no"]), effective_sender_charge_amount(row, use_current_setting_if_missing=True), _dec(row["receiver_rate_usdt"]), str(row["offer_expires_at"]), receiver_chat_id, payload_type),
+                    reply_markup=build_offer_keyboard(public_id, receiver_chat_id, payload_type),
                     protect_content=PROTECT_CONTENT,
                 )
                 return receiver_chat_id, msg.message_id
@@ -10483,6 +11662,7 @@ async def admin_retry_qr_order(bot, public_id: str) -> tuple[bool, str]:
     )
     if telegram_application is not None:
         schedule_qr_expiry_task(telegram_application, public_id, expires_at)
+        schedule_open_offer_timer_refresh_task(telegram_application, public_id)
     return True, f"QR retried and sent to {sent} receiver(s). {failed} failed."
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -10500,6 +11680,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not can_use_sender_features(chat.id, user):
         await update.message.reply_text(tr_chat(chat.id, "only_active_sender_photos"))
         return
+
+    send_state = SEND_FLOW.get(chat.id) or {}
+    if str(send_state.get("method") or "").lower() in {"access_token", "text"}:
+        await update.message.reply_text(tr_chat(chat.id, "access_token_photo_wrong_mode"))
+        return
+    if str(send_state.get("method") or "").lower() == "qr":
+        SEND_FLOW.pop(chat.id, None)
 
     settings = get_marketplace_settings()
     if settings["maintenance_mode"]:
@@ -10620,6 +11807,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ),
             reply_markup=sender_open_offer_keyboard(public_id, chat.id),
         )
+        schedule_open_offer_timer_refresh_task(context.application, public_id)
 
     await delete_original_sender_message_safely(context, chat.id, update.message.message_id)
 
@@ -10703,6 +11891,10 @@ async def complete_photo(
         return False, tr_chat(actor_chat_id, "status_update_failed")
 
     settle_photo_wallets(photo.public_id, status)
+    record_after_status = get_photo_record(photo.public_id)
+    if record_after_status is not None and order_payload_type(record_after_status) == "access_token":
+        finalize_access_token_key_for_order(photo.public_id, status)
+        await notify_admins_low_access_token_keys(bot)
 
     status_text = tr_chat(actor_chat_id, "stats_done") if status == "done" else tr_chat(actor_chat_id, "stats_failed")
     receiver_caption = build_status_caption(photo, status, failure_reason=failure_reason, chat_id=photo.receiver_chat_id or actor_chat_id)
@@ -10715,28 +11907,44 @@ async def complete_photo(
     edit_errors: list[str] = []
 
     if photo.receiver_message_id:
-        try:
-            await bot.edit_message_caption(
-                chat_id=photo.receiver_chat_id,
-                message_id=photo.receiver_message_id,
-                caption=receiver_caption,
-                reply_markup=qr_dispute_keyboard(photo.public_id, photo.receiver_chat_id or actor_chat_id),
-            )
-        except TelegramError as exc:
-            logger.warning("Could not edit receiver QR caption %s/%s: %s", photo.receiver_chat_id, photo.receiver_message_id, exc)
+        receiver_markup = qr_dispute_keyboard(photo.public_id, photo.receiver_chat_id or actor_chat_id)
+        edited = await edit_order_message(
+            bot,
+            chat_id=photo.receiver_chat_id,
+            message_id=photo.receiver_message_id,
+            text=receiver_caption,
+            reply_markup=receiver_markup,
+        )
+        markup_edited = await edit_order_reply_markup(
+            bot,
+            chat_id=photo.receiver_chat_id,
+            message_id=photo.receiver_message_id,
+            reply_markup=receiver_markup,
+        )
+        if not edited:
             edit_errors.append("receiver")
+        if not markup_edited:
+            edit_errors.append("receiver buttons")
 
     if photo.sender_message_id:
-        try:
-            await bot.edit_message_caption(
-                chat_id=photo.sender_chat_id,
-                message_id=photo.sender_message_id,
-                caption=sender_caption,
-                reply_markup=qr_dispute_keyboard(photo.public_id, photo.sender_chat_id),
-            )
-        except TelegramError as exc:
-            logger.warning("Could not edit sender QR caption %s/%s: %s", photo.sender_chat_id, photo.sender_message_id, exc)
+        sender_markup = qr_dispute_keyboard(photo.public_id, photo.sender_chat_id)
+        edited = await edit_order_message(
+            bot,
+            chat_id=photo.sender_chat_id,
+            message_id=photo.sender_message_id,
+            text=sender_caption,
+            reply_markup=sender_markup,
+        )
+        markup_edited = await edit_order_reply_markup(
+            bot,
+            chat_id=photo.sender_chat_id,
+            message_id=photo.sender_message_id,
+            reply_markup=sender_markup,
+        )
+        if not edited:
             edit_errors.append("sender")
+        if not markup_edited:
+            edit_errors.append("sender buttons")
 
     emoji = "✅" if status == "done" else "❌"
 
@@ -10814,10 +12022,12 @@ async def start_failure_reason_flow(
     if error or not photo:
         await message.reply_text(error or tr_chat(chat_id, "qr_not_found_generic"))
         return
+    row = get_photo_record(photo.public_id)
+    payload_type = order_payload_type(row) if row is not None else "qr"
     FAIL_REASON_FLOW.pop(chat_id, None)
     await message.reply_text(
         tr_chat(chat_id, "select_failure_reason", public_id=photo.public_id),
-        reply_markup=failure_reason_keyboard(photo.public_id, chat_id),
+        reply_markup=failure_reason_keyboard(photo.public_id, chat_id, payload_type),
     )
 
 
@@ -10858,18 +12068,15 @@ async def fail_reason_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_failure_reason"), show_alert=True)
         return
 
-    reason = FAIL_REASON_CHOICES.get(reason_key)
+    chat_id = query.message.chat.id
+    row = get_photo_record(public_id)
+    payload_type = order_payload_type(row) if row is not None else "qr"
+    reason = failure_reason_text(reason_key, payload_type)
     if not reason:
         await query.answer(tr_chat(query.message.chat.id if query.message else query.from_user.id, "invalid_failure_reason"), show_alert=True)
         return
 
-    chat_id = query.message.chat.id
-    reason_label_keys = {
-        "qr_not_working": "fail_reason_qr_not_working",
-        "qr_expired": "fail_reason_qr_expired",
-        "limit_over": "fail_reason_limit_over",
-    }
-    localized_reason = tr_chat(chat_id, reason_label_keys.get(reason_key, reason_key))
+    localized_reason = tr_chat(chat_id, failure_reason_label_key(reason_key, payload_type))
     ok, result = await complete_photo(
         bot=context.bot,
         actor_chat_id=chat_id,
@@ -10882,7 +12089,7 @@ async def fail_reason_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer(tr_chat(chat_id, "marked_failed_alert"), show_alert=False)
         try:
             await query.edit_message_text(
-                f"{tr_chat(chat_id, 'qr_marked_failed')}\n"
+                f"{tr_chat(chat_id, 'access_token_marked_failed' if payload_type == 'access_token' else 'qr_marked_failed')}\n"
                 f"🆔 {tr_chat(chat_id, 'caption_id')}: {public_id}\n"
                 f"📝 {tr_chat(chat_id, 'caption_reason')}: {localized_reason}"
             )
@@ -10904,6 +12111,7 @@ def localized_claim_offer_result(chat_id: int, result: str, public_id: str | Non
         "Offer expired. Another receiver already accepted this QR.": "claim_offer_taken",
         "Claimed.": "claim_success",
         "claim_offer_canceled": "claim_offer_canceled",
+        "claim_no_access_token_key": "access_token_scans_unavailable",
     }
     key = mapping.get(str(result or ""))
     if not key:
@@ -10923,6 +12131,10 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
     receiver_chat_id = query.message.chat.id
     ok, result, row, auto_off = claim_offer_in_db(public_id, receiver_chat_id)
     if not ok:
+        if result == "claim_no_access_token_key" and row is not None:
+            expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
+            if expired_ok and expired_row is not None:
+                await notify_admin_expired_qr(context.bot, public_id, expired_row)
         if result == "Offer expired.":
             expired_ok, _expired_msg, expired_row = expire_pending_qr_in_db(public_id)
             if expired_ok and expired_row is not None:
@@ -10938,6 +12150,7 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     assert row is not None
     receiver_message_id: int | None = None
+    payload_type = order_payload_type(row)
     accepted_caption = build_receiver_qr_caption(
         str(row["date"]),
         int(row["daily_no"]),
@@ -10945,20 +12158,33 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         str(row["offer_expires_at"] or ""),
         receiver_chat_id,
     )
+    accepted_text = build_receiver_access_token_message(row, receiver_chat_id) if payload_type == "access_token" else accepted_caption
 
-    await query.answer(tr_chat(receiver_chat_id, "offer_claimed"), show_alert=False)
-    # Edit the accepted offer message itself into the QR photo, so the receiver does not get a second QR message.
+    claimed_alert_key = "offer_claimed_access_token" if payload_type == "access_token" else "offer_claimed"
+    await query.answer(tr_chat(receiver_chat_id, claimed_alert_key), show_alert=False)
+    # Edit the accepted offer message itself into the delivered item, so the receiver does not get a second message.
     for note in offer_notifications(public_id):
         note_chat_id = int(note["receiver_chat_id"])
         note_message_id = int(note["message_id"])
         try:
             if note_chat_id == receiver_chat_id:
-                await context.bot.edit_message_media(
-                    chat_id=note_chat_id,
-                    message_id=note_message_id,
-                    media=InputMediaPhoto(media=row["generated_file_id"], caption=accepted_caption),
-                    reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
-                )
+                if payload_type == "access_token":
+                    edited_receiver_token = await edit_receiver_access_token_order_message(
+                        context.bot,
+                        note_chat_id,
+                        note_message_id,
+                        accepted_text,
+                        reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                    )
+                    if not edited_receiver_token:
+                        continue
+                else:
+                    await context.bot.edit_message_media(
+                        chat_id=note_chat_id,
+                        message_id=note_message_id,
+                        media=InputMediaPhoto(media=row["generated_file_id"], caption=accepted_caption),
+                        reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                    )
                 receiver_message_id = note_message_id
                 set_receiver_message_for_offer(public_id, note_message_id)
                 set_offer_notification_state(public_id, receiver_chat_id, "claimed")
@@ -10974,38 +12200,94 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             logger.debug("Could not edit offer notification %s/%s: %s", note["receiver_chat_id"], note["message_id"], exc)
 
     if receiver_message_id is None:
-        # Fallback for rare Telegram edit failures: still deliver the QR, but keep this as an exception path.
+        # Fallback for rare Telegram edit failures: still deliver the item, but keep this as an exception path.
         try:
-            receiver_msg = await context.bot.send_photo(
-                chat_id=receiver_chat_id,
-                photo=row["generated_file_id"],
-                caption=accepted_caption,
-                reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
-                protect_content=PROTECT_CONTENT,
-            )
+            if payload_type == "access_token":
+                receiver_msg = await context.bot.send_message(
+                    chat_id=receiver_chat_id,
+                    text=accepted_text,
+                    parse_mode="HTML",
+                    reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                    protect_content=PROTECT_CONTENT,
+                )
+            else:
+                receiver_msg = await context.bot.send_photo(
+                    chat_id=receiver_chat_id,
+                    photo=row["generated_file_id"],
+                    caption=accepted_caption,
+                    reply_markup=receiver_status_keyboard(public_id, receiver_chat_id),
+                    protect_content=PROTECT_CONTENT,
+                )
             set_receiver_message_for_offer(public_id, receiver_msg.message_id)
             receiver_message_id = receiver_msg.message_id
         except TelegramError as exc:
-            logger.warning("Could not deliver claimed QR %s to receiver %s: %s", public_id, receiver_chat_id, exc)
+            logger.warning("Could not deliver claimed item %s to receiver %s: %s", public_id, receiver_chat_id, exc)
             await query.answer(tr_chat(receiver_chat_id, "claim_saved_delivery_failed"), show_alert=True)
             return
 
-    await edit_sender_offer_caption(
-        context.bot,
-        int(row["sender_chat_id"]),
-        int(row["sender_message_id"] or 0),
-        build_sender_offer_caption(
+    schedule_claimed_order_timer_refresh_task(context.application, public_id)
+    sender_status_key = "sender_access_token_offer_accepted" if payload_type == "access_token" else "sender_offer_accepted"
+    if payload_type == "access_token":
+        sender_text = build_sender_access_token_offer_message(
             str(row["date"]),
             int(row["daily_no"]),
             public_id,
-            tr_chat(int(row["sender_chat_id"]), "sender_offer_accepted"),
+            tr_chat(int(row["sender_chat_id"]), sender_status_key),
+            str(row["payload_text"] or "").strip(),
             expires_at=str(row["offer_expires_at"] or ""),
             sender_rate=effective_sender_reserved_display(row),
             order_row=row,
             chat_id=int(row["sender_chat_id"]),
-        ),
+        )
+        await edit_sender_access_token_order_message(
+            context.bot,
+            int(row["sender_chat_id"]),
+            int(row["sender_message_id"] or 0),
+            sender_text,
+            reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
+        )
+    else:
+        sender_text = build_sender_offer_caption(
+            str(row["date"]),
+            int(row["daily_no"]),
+            public_id,
+            tr_chat(int(row["sender_chat_id"]), sender_status_key),
+            expires_at=str(row["offer_expires_at"] or ""),
+            sender_rate=effective_sender_reserved_display(row),
+            order_row=row,
+            chat_id=int(row["sender_chat_id"]),
+        )
+        await edit_sender_offer_caption(
+            context.bot,
+            int(row["sender_chat_id"]),
+            int(row["sender_message_id"] or 0),
+            sender_text,
+            reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
+        )
+    await edit_order_reply_markup(
+        context.bot,
+        chat_id=int(row["sender_chat_id"]),
+        message_id=int(row["sender_message_id"] or 0),
         reply_markup=sender_notify_keyboard(public_id, int(row["sender_chat_id"])),
     )
+
+    if payload_type == "access_token":
+        try:
+            key_embedded_in_order_message = bool(assigned_access_token_key_plain(public_id))
+        except Exception:
+            key_embedded_in_order_message = False
+        delivered = await deliver_access_token_key_to_receiver(context.bot, public_id, receiver_chat_id, force=True)
+        if not delivered and not key_embedded_in_order_message:
+            try:
+                await context.bot.send_message(
+                    chat_id=receiver_chat_id,
+                    text=tr_chat(receiver_chat_id, "access_token_key_delivery_failed"),
+                    protect_content=PROTECT_CONTENT,
+                )
+            except TelegramError:
+                pass
+        await notify_admins_low_access_token_keys(context.bot)
+
     schedule_qr_expiry_warning_task(context.application, public_id, str(row["offer_expires_at"] or ""))
 
     if auto_off:
@@ -11047,15 +12329,13 @@ async def cancel_order_button(update: Update, context: ContextTypes.DEFAULT_TYPE
         tr_chat(sender_chat_id, "cancel_order_status_line"),
         chat_id=sender_chat_id,
     )
-    try:
-        await context.bot.edit_message_caption(
-            chat_id=sender_chat_id,
-            message_id=int(row["sender_message_id"] or query.message.message_id),
-            caption=canceled_caption,
-            reply_markup=None,
-        )
-    except TelegramError as exc:
-        logger.warning("Could not edit canceled sender QR %s/%s: %s", sender_chat_id, public_id, exc)
+    await edit_order_message(
+        context.bot,
+        chat_id=sender_chat_id,
+        message_id=int(row["sender_message_id"] or query.message.message_id),
+        text=canceled_caption,
+        reply_markup=None,
+    )
 
     # Remove receiver-side accept buttons so late receivers cannot try to claim it.
     for note in offer_notifications(public_id):
@@ -11157,20 +12437,30 @@ async def pending_qr_button(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer(tr_chat(chat_id, "qr_expired_alert"), show_alert=True)
         return
     try:
-        msg = await context.bot.send_photo(
-            chat_id=chat_id,
-            photo=row["generated_file_id"],
-            caption=build_receiver_qr_caption(
-                str(row["date"]),
-                int(row["daily_no"]),
-                public_id,
-                str(row["offer_expires_at"] or ""),
-                chat_id,
-            ),
-            reply_markup=receiver_status_keyboard(public_id, chat_id),
-            protect_content=PROTECT_CONTENT,
-        )
+        if order_payload_type(row) == "access_token":
+            msg = await context.bot.send_message(
+                chat_id=chat_id,
+                text=build_receiver_access_token_message(row, chat_id),
+                parse_mode="HTML",
+                reply_markup=receiver_status_keyboard(public_id, chat_id),
+                protect_content=PROTECT_CONTENT,
+            )
+        else:
+            msg = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=row["generated_file_id"],
+                caption=build_receiver_qr_caption(
+                    str(row["date"]),
+                    int(row["daily_no"]),
+                    public_id,
+                    str(row["offer_expires_at"] or ""),
+                    chat_id,
+                ),
+                reply_markup=receiver_status_keyboard(public_id, chat_id),
+                protect_content=PROTECT_CONTENT,
+            )
         set_receiver_message_for_offer(public_id, msg.message_id)
+        schedule_claimed_order_timer_refresh_task(context.application, public_id)
         await query.answer(tr_chat(chat_id, "qr_opened_below"))
     except TelegramError as exc:
         logger.warning("Could not reopen pending QR %s for %s: %s", public_id, chat_id, exc)
@@ -11203,11 +12493,13 @@ async def button_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if error or not photo:
             await query.answer(error or tr_chat(chat_id, "qr_not_found_generic"), show_alert=True)
             return
+        row = get_photo_record(photo.public_id)
+        payload_type = order_payload_type(row) if row is not None else "qr"
         FAIL_REASON_FLOW.pop(chat_id, None)
         await query.answer(tr_chat(chat_id, "select_failure_reason_alert"), show_alert=False)
         await query.message.reply_text(
             tr_chat(chat_id, "select_failure_reason", public_id=photo.public_id),
-            reply_markup=failure_reason_keyboard(photo.public_id, chat_id),
+            reply_markup=failure_reason_keyboard(photo.public_id, chat_id, payload_type),
         )
         return
 
@@ -11246,10 +12538,11 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
         note_message_id = int(note["message_id"])
         try:
             if claimed_receiver_id and note_chat_id == claimed_receiver_id:
-                await bot.edit_message_caption(
+                await edit_order_message(
+                    bot,
                     chat_id=note_chat_id,
                     message_id=note_message_id,
-                    caption=expired_caption_for(note_chat_id),
+                    text=expired_caption_for(note_chat_id),
                     reply_markup=qr_dispute_keyboard(public_id, note_chat_id),
                 )
             else:
@@ -11264,23 +12557,22 @@ async def notify_qr_expired_by_timeout(bot, public_id: str, row: sqlite3.Row) ->
             pass
 
     if claimed_receiver_id and receiver_message_id:
-        try:
-            await bot.edit_message_caption(
-                chat_id=claimed_receiver_id,
-                message_id=receiver_message_id,
-                caption=expired_caption_for(claimed_receiver_id),
-                reply_markup=qr_dispute_keyboard(public_id, claimed_receiver_id),
-            )
-        except TelegramError:
-            pass
+        await edit_order_message(
+            bot,
+            chat_id=claimed_receiver_id,
+            message_id=receiver_message_id,
+            text=expired_caption_for(claimed_receiver_id),
+            reply_markup=qr_dispute_keyboard(public_id, claimed_receiver_id),
+        )
 
     try:
         if row["sender_message_id"]:
             sender_chat_id = int(row["sender_chat_id"])
-            await bot.edit_message_caption(
+            await edit_order_message(
+                bot,
                 chat_id=sender_chat_id,
                 message_id=int(row["sender_message_id"]),
-                caption=expired_caption_for(sender_chat_id),
+                text=expired_caption_for(sender_chat_id),
                 reply_markup=qr_dispute_keyboard(public_id, sender_chat_id),
             )
     except TelegramError:
@@ -11313,13 +12605,15 @@ def expire_pending_qr_in_db(public_id: str) -> tuple[bool, str, sqlite3.Row | No
             conn.rollback()
             return False, f"QR is already marked {str(row['status']).upper()}.", row
         expires_at = qr_expiry_status_at(row)
+        payload_type = order_payload_type(row)
+        expired_reason = "Access Token expired" if payload_type == "access_token" else "QR expired"
         cur = conn.execute(
             """
             UPDATE photos
-            SET status = 'failed', offer_state = 'expired', status_by = NULL, status_at = ?, failure_reason = COALESCE(NULLIF(failure_reason, ''), 'QR expired')
+            SET status = 'failed', offer_state = 'expired', status_by = NULL, status_at = ?, failure_reason = COALESCE(NULLIF(failure_reason, ''), ?)
             WHERE public_id = ? AND status = 'pending'
             """,
-            (expires_at, public_id),
+            (expires_at, expired_reason, public_id),
         )
         if cur.rowcount <= 0:
             conn.rollback()
@@ -11328,7 +12622,9 @@ def expire_pending_qr_in_db(public_id: str) -> tuple[bool, str, sqlite3.Row | No
 
     # Release the sender reserve through the normal failed/expired settlement path.
     settle_photo_wallets(public_id, "failed")
-    return True, "QR expired. Sender reserve released.", row
+    if order_payload_type(row) == "access_token":
+        finalize_access_token_key_for_order(public_id, "failed")
+    return True, f"{expired_reason}. Sender reserve released.", row
 
 
 async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None:
@@ -11358,10 +12654,11 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
     try:
         if row["sender_message_id"]:
             sender_id = int(row["sender_chat_id"])
-            await bot.edit_message_caption(
+            await edit_order_message(
+                bot,
                 chat_id=sender_id,
                 message_id=int(row["sender_message_id"]),
-                caption=expired_admin_caption_for(sender_id),
+                text=expired_admin_caption_for(sender_id),
                 reply_markup=qr_dispute_keyboard(public_id, sender_id),
             )
     except TelegramError:
@@ -11370,10 +12667,11 @@ async def notify_admin_expired_qr(bot, public_id: str, row: sqlite3.Row) -> None
     receiver_id = int(row["receiver_chat_id"] or 0)
     try:
         if receiver_id and row["receiver_message_id"]:
-            await bot.edit_message_caption(
+            await edit_order_message(
+                bot,
                 chat_id=receiver_id,
                 message_id=int(row["receiver_message_id"]),
-                caption=expired_admin_caption_for(receiver_id),
+                text=expired_admin_caption_for(receiver_id),
                 reply_markup=qr_dispute_keyboard(public_id, receiver_id),
             )
     except TelegramError:
@@ -11417,18 +12715,25 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
     receiver_effect = str(result.get("receiver_effect") or "none")
 
     photo = row_to_photo(row)
-    caption = build_status_caption(photo, new_status, failure_reason=failure_reason) if photo else f"Order {public_id}: {new_status.upper()}"
-    caption += "\n🛠 Changed by admin."
-    if sender_effect == "refunded":
-        caption += f"\n💳 Sender refunded: ${_money(abs(sender_amount))} USDT."
-    elif sender_effect == "reserve_released":
-        caption += f"\n💳 Sender reserve released: ${_money(abs(sender_amount))} USDT."
-    elif sender_effect == "charged":
-        caption += f"\n💳 Sender charged: ${_money(abs(sender_amount))} USDT."
-    if receiver_effect == "deducted":
-        caption += f"\n💰 Receiver earnings deducted: ${_money(abs(receiver_amount))} USDT."
-    elif receiver_effect == "credited":
-        caption += f"\n💰 Receiver credited: ${_money(abs(receiver_amount))} USDT."
+
+    def admin_status_caption_for(chat_id: int, role: str) -> str:
+        caption = build_status_caption(photo, new_status, failure_reason=failure_reason, chat_id=chat_id) if photo else f"Order {public_id}: {new_status.upper()}"
+        caption += "\n🛠 Changed by admin."
+        # Keep user-facing status edits private: each side sees only their own
+        # wallet/earnings effect. Admin pages still show both sides.
+        if role == "sender":
+            if sender_effect == "refunded":
+                caption += f"\n💳 Sender refunded: ${_money(abs(sender_amount))} USDT."
+            elif sender_effect == "reserve_released":
+                caption += f"\n💳 Sender reserve released: ${_money(abs(sender_amount))} USDT."
+            elif sender_effect == "charged":
+                caption += f"\n💳 Sender charged: ${_money(abs(sender_amount))} USDT."
+        elif role == "receiver":
+            if receiver_effect == "deducted":
+                caption += f"\n💰 Receiver earnings deducted: ${_money(abs(receiver_amount))} USDT."
+            elif receiver_effect == "credited":
+                caption += f"\n💰 Receiver credited: ${_money(abs(receiver_amount))} USDT."
+        return caption
 
     # Open offer messages are text messages, not photo captions. Disable/replace them on failed overrides.
     if new_status == "failed":
@@ -11455,15 +12760,15 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
     ):
         if not chat_id or not message_id:
             continue
-        try:
-            await bot.edit_message_caption(
-                chat_id=chat_id,
-                message_id=message_id,
-                caption=caption,
-                reply_markup=qr_dispute_keyboard(public_id, chat_id),
-            )
-        except TelegramError as exc:
-            logger.warning("Could not edit %s caption after admin status change for %s: %s", label, public_id, exc)
+        edited = await edit_order_message(
+            bot,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=admin_status_caption_for(chat_id, label),
+            reply_markup=qr_dispute_keyboard(public_id, chat_id),
+        )
+        if not edited:
+            logger.warning("Could not edit %s message after admin status change for %s", label, public_id)
 
     sent = failed = 0
     status_line = "✅ DONE" if new_status == "done" else "❌ FAILED"
@@ -11512,6 +12817,8 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
 async def marketplace_watcher(application: Application) -> None:
     while True:
         try:
+            for row in list_claimed_orders_for_timer_refresh(limit=100):
+                await refresh_claimed_order_timer_once(application.bot, str(row["public_id"]), row)
             for row in list_claimed_qrs_needing_expiry_warning(limit=100):
                 await send_receiver_expiry_warning(application.bot, row)
             for row in list_pending_qrs_to_expire(limit=100):
@@ -11757,6 +13064,323 @@ polling_started = False
 marketplace_background_task: asyncio.Task | None = None
 payment_background_task: asyncio.Task | None = None
 web_app = FastAPI(title=f"{APP_NAME} Admin")
+
+
+class ApiFlowError(Exception):
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = int(status_code)
+        self.detail = str(detail)
+        super().__init__(self.detail)
+
+
+def api_error(status_code: int, detail: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+def api_authenticated_chat_id(authorization: str | None) -> int:
+    if not API_KEYS:
+        raise api_error(503, "API is not configured. Set API_KEYS in the environment.")
+    auth = str(authorization or "").strip()
+    if not auth.lower().startswith("bearer "):
+        raise api_error(401, "Missing Authorization: Bearer <api_key> header.")
+    token = auth.split(None, 1)[1].strip() if " " in auth else ""
+    for configured_token, chat_id in API_KEYS.items():
+        if hmac.compare_digest(token, configured_token):
+            return int(chat_id)
+    raise api_error(401, "Invalid API key.")
+
+
+def api_user_for_key(authorization: str | None) -> tuple[int, UserRow]:
+    chat_id = api_authenticated_chat_id(authorization)
+    user = get_user_for_chat(chat_id)
+    if not is_active_user_or_admin(chat_id, user):
+        raise api_error(403, "API key is linked to an inactive or unregistered account.")
+    if user is None:
+        raise api_error(403, "API key is not linked to a valid account.")
+    return chat_id, user
+
+
+def api_order_visible_to_user(row: sqlite3.Row | None, chat_id: int, user: UserRow) -> bool:
+    if not row:
+        return False
+    if is_admin(chat_id):
+        return True
+    if user.role == "sender":
+        return int(row["sender_chat_id"]) == int(chat_id)
+    if user.role == "receiver":
+        return int(row["receiver_chat_id"] or 0) == int(chat_id)
+    return False
+
+
+def api_photo_payload(row: sqlite3.Row, requester_chat_id: int | None = None, user: UserRow | None = None) -> dict:
+    payload = {
+        "public_id": row["public_id"],
+        "date": row["date"],
+        "daily_no": int(row["daily_no"]),
+        "status": row["status"],
+        "offer_state": row["offer_state"] if "offer_state" in row.keys() else None,
+        "payload_type": order_payload_type(row),
+        "created_at": row["created_at"],
+        "expires_at": row["offer_expires_at"] if "offer_expires_at" in row.keys() else None,
+        "claimed_at": row["claimed_at"] if "claimed_at" in row.keys() else None,
+        "status_at": row["status_at"] if "status_at" in row.keys() else None,
+        "failure_reason": row["failure_reason"] if "failure_reason" in row.keys() else None,
+    }
+    if requester_chat_id is not None and is_admin(int(requester_chat_id)):
+        payload["sender_chat_id"] = int(row["sender_chat_id"])
+        payload["receiver_chat_id"] = int(row["receiver_chat_id"] or 0) or None
+    elif user and user.role == "sender":
+        payload["sender_chat_id"] = int(row["sender_chat_id"])
+    elif user and user.role == "receiver":
+        payload["receiver_chat_id"] = int(row["receiver_chat_id"] or 0) or None
+    return payload
+
+
+def api_dispute_payload(row: sqlite3.Row, include_messages: bool = False) -> dict:
+    payload = {
+        "ref_id": row["ref_id"] or f"DSP{int(row['id']):06d}",
+        "public_id": row["public_id"],
+        "chat_id": int(row["chat_id"]),
+        "role": row["role"],
+        "message": row["message"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "resolved_at": row["resolved_at"],
+        "admin_note": row["admin_note"],
+    }
+    if include_messages:
+        payload["messages"] = [
+            {
+                "sender_type": msg["sender_type"],
+                "sender_chat_id": int(msg["sender_chat_id"]) if msg["sender_chat_id"] is not None else None,
+                "message": msg["message"],
+                "created_at": msg["created_at"],
+            }
+            for msg in list_dispute_chat_messages(int(row["id"]))
+        ]
+    return payload
+
+
+async def create_api_qr_offer(sender_chat_id: int, image_bytes: bytes) -> dict:
+    if telegram_application is None:
+        raise ApiFlowError(503, "Telegram application is not ready.")
+    user = get_user_for_chat(sender_chat_id)
+    if not can_use_sender_features(sender_chat_id, user):
+        raise ApiFlowError(403, "Only active sender accounts can submit QR codes.")
+
+    settings = get_marketplace_settings()
+    if settings["maintenance_mode"]:
+        raise ApiFlowError(503, "Maintenance mode is enabled. New QR submissions are paused.")
+
+    receivers = online_receivers()
+    if not receivers:
+        raise ApiFlowError(409, "No receiver is online right now.")
+
+    sender_rate = _dec(settings["sender_rate_usdt"])
+    receiver_rate = _dec(settings["receiver_rate_usdt"])
+    if sender_rate > 0 and available_sender_balance(sender_chat_id) < sender_rate:
+        raise ApiFlowError(
+            402,
+            f"Insufficient wallet balance. Required ${_money(sender_rate)} USDT, available ${_money(available_sender_balance(sender_chat_id))} USDT.",
+        )
+
+    started_at = time.perf_counter()
+    try:
+        clean_qr_file, qr_data, qr_hash = await asyncio.to_thread(decode_and_rebuild_sync, image_bytes)
+    except ValueError as exc:
+        raise ApiFlowError(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected API QR processing error")
+        raise ApiFlowError(422, "Could not process the QR image.") from exc
+
+    date_str = today_str()
+    daily_no = reserve_daily_number(date_str)
+    public_id = f"{date_str}-{daily_no:04d}"
+    qr_expire_minutes = int(settings["qr_expire_minutes"])
+    expires_at = datetime.fromtimestamp(
+        now_dt().timestamp() + max(1, qr_expire_minutes) * 60,
+        ZoneInfo(BOT_TZ),
+    ).isoformat(timespec="seconds")
+
+    ok, _reserve_msg = reserve_sender_funds(sender_chat_id, sender_rate, public_id)
+    if not ok:
+        raise ApiFlowError(
+            402,
+            f"Insufficient wallet balance. Required ${_money(sender_rate)} USDT, available ${_money(available_sender_balance(sender_chat_id))} USDT.",
+        )
+
+    processing_ms = int((time.perf_counter() - started_at) * 1000)
+    caption = build_sender_offer_caption(
+        date_str,
+        daily_no,
+        public_id,
+        tr_chat(sender_chat_id, "sender_offer_created"),
+        expires_at=expires_at,
+        sender_rate=sender_rate,
+        chat_id=sender_chat_id,
+    )
+
+    try:
+        sender_msg = await telegram_application.bot.send_photo(
+            chat_id=sender_chat_id,
+            photo=clean_qr_file,
+            caption=caption,
+            protect_content=PROTECT_CONTENT,
+        )
+        generated_file_id = sender_msg.photo[-1].file_id
+    except TelegramError as exc:
+        release_sender_reserve(sender_chat_id, sender_rate, public_id, "Sender API delivery failed")
+        logger.warning("API Telegram send failed: %s", exc)
+        raise ApiFlowError(502, "Generated clean QR could not be delivered to the sender chat.") from exc
+
+    save_open_offer(
+        public_id=public_id,
+        date_str=date_str,
+        daily_no=daily_no,
+        sender_chat_id=sender_chat_id,
+        sender_message_id=sender_msg.message_id,
+        generated_file_id=generated_file_id,
+        qr_sha256=qr_hash,
+        qr_data=qr_data if STORE_QR_DATA else None,
+        processing_ms=processing_ms,
+        sender_rate=sender_rate,
+        receiver_rate=receiver_rate,
+        expires_at=expires_at,
+    )
+    schedule_qr_expiry_task(telegram_application, public_id, expires_at)
+
+    sent, failed = await send_offer_to_receivers_by_bot(telegram_application.bot, public_id)
+    if sent <= 0:
+        expire_offer_in_db(public_id, "expired")
+        release_sender_reserve(sender_chat_id, sender_rate, public_id, "No receiver could be notified")
+        await edit_sender_offer_caption(
+            telegram_application.bot,
+            sender_chat_id,
+            sender_msg.message_id,
+            build_sender_offer_caption(
+                date_str,
+                daily_no,
+                public_id,
+                tr_chat(sender_chat_id, "offer_failed_no_receiver"),
+                chat_id=sender_chat_id,
+            ),
+        )
+    else:
+        await edit_sender_offer_caption(
+            telegram_application.bot,
+            sender_chat_id,
+            sender_msg.message_id,
+            build_sender_offer_caption(
+                date_str,
+                daily_no,
+                public_id,
+                tr_chat(sender_chat_id, "sender_offer_sent"),
+                expires_at=expires_at,
+                sender_rate=sender_rate,
+                chat_id=sender_chat_id,
+            ),
+            reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
+        )
+        schedule_open_offer_timer_refresh_task(telegram_application, public_id)
+
+    row = get_photo_record(public_id)
+    return {
+        "ok": sent > 0,
+        "public_id": public_id,
+        "status": row["status"] if row else ("pending" if sent > 0 else "failed"),
+        "offer_state": row["offer_state"] if row and "offer_state" in row.keys() else ("open" if sent > 0 else "expired"),
+        "expires_at": expires_at,
+        "sent_receivers": sent,
+        "failed_receivers": failed,
+        "processing_ms": processing_ms,
+        "original_upload_stored": False,
+    }
+
+
+@web_app.post("/api/v1/qrs")
+async def api_create_qr(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+):
+    sender_chat_id, _user = api_user_for_key(authorization)
+    content_type = str(file.content_type or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise api_error(415, "Upload must be an image file.")
+    try:
+        image_bytes = await file.read(API_MAX_UPLOAD_BYTES + 1)
+    finally:
+        await file.close()
+    if not image_bytes:
+        raise api_error(400, "Upload is empty.")
+    if len(image_bytes) > API_MAX_UPLOAD_BYTES:
+        raise api_error(413, f"Upload is too large. Max size is {API_MAX_UPLOAD_BYTES} bytes.")
+    try:
+        return await create_api_qr_offer(sender_chat_id, image_bytes)
+    except ApiFlowError as exc:
+        raise api_error(exc.status_code, exc.detail) from exc
+
+
+@web_app.get("/api/v1/qrs/{public_id}")
+async def api_get_qr(public_id: str, authorization: str | None = Header(default=None)):
+    chat_id, user = api_user_for_key(authorization)
+    row = get_photo_record(public_id)
+    if not api_order_visible_to_user(row, chat_id, user):
+        raise api_error(404, "QR order not found for this API key.")
+    return {"ok": True, "qr": api_photo_payload(row, chat_id, user)}
+
+
+@web_app.post("/api/v1/disputes")
+async def api_create_dispute(request: Request, authorization: str | None = Header(default=None)):
+    chat_id, user = api_user_for_key(authorization)
+    try:
+        data = await request.json()
+    except Exception as exc:
+        raise api_error(400, "Request body must be JSON.") from exc
+    if not isinstance(data, dict):
+        raise api_error(400, "Request body must be a JSON object.")
+    public_id = str(data.get("public_id") or "").strip() or None
+    message = str(data.get("message") or data.get("reason") or "").strip()
+    if len(message) < 3:
+        raise api_error(400, "Dispute message must be at least 3 characters.")
+    ok, error = _validate_dispute_public_id(chat_id, user, public_id)
+    if not ok:
+        raise api_error(400, error or "Could not start dispute.")
+    ref_id = create_dispute(chat_id, public_id, message)
+    await notify_admins_new_dispute(ref_id, chat_id, public_id, message)
+    row = get_dispute_by_ref(ref_id)
+    return {"ok": True, "dispute": api_dispute_payload(row) if row else {"ref_id": ref_id}}
+
+
+@web_app.get("/api/v1/disputes/{ref_id}")
+async def api_get_dispute(ref_id: str, authorization: str | None = Header(default=None)):
+    chat_id, _user = api_user_for_key(authorization)
+    row = get_dispute_by_ref(ref_id)
+    if not row or int(row["chat_id"]) != int(chat_id):
+        raise api_error(404, "Dispute not found for this API key.")
+    return {"ok": True, "dispute": api_dispute_payload(row, include_messages=True)}
+
+
+@web_app.post("/api/v1/disputes/{ref_id}/replies")
+async def api_reply_dispute(ref_id: str, request: Request, authorization: str | None = Header(default=None)):
+    chat_id, _user = api_user_for_key(authorization)
+    try:
+        data = await request.json()
+    except Exception as exc:
+        raise api_error(400, "Request body must be JSON.") from exc
+    if not isinstance(data, dict):
+        raise api_error(400, "Request body must be a JSON object.")
+    message = str(data.get("message") or data.get("reply") or "").strip()
+    if len(message) < 2:
+        raise api_error(400, "Reply message must be at least 2 characters.")
+    row = get_dispute_by_ref(ref_id)
+    if not row or int(row["chat_id"]) != int(chat_id):
+        raise api_error(404, "Dispute not found for this API key.")
+    if str(row["status"] or "").lower() not in {"open", "under_review"}:
+        raise api_error(409, "This dispute is already closed.")
+    add_dispute_chat_message(int(row["id"]), "user", chat_id, message)
+    await notify_admins_dispute_reply(row, message)
+    refreshed = get_dispute_by_ref(ref_id)
+    return {"ok": True, "dispute": api_dispute_payload(refreshed, include_messages=True) if refreshed else {"ref_id": ref_id}}
 
 
 def _background_task_done(name: str):
@@ -12153,6 +13777,9 @@ def qr_duration_value(row: sqlite3.Row) -> str:
 
 
 def photo_no_html(row: sqlite3.Row) -> str:
+    if order_payload_type(row) == "access_token":
+        return f'Access Token #{esc(row["daily_no"])}'
+    return f'QR #{esc(row["daily_no"])}'
     return f'📷 #{esc(row["daily_no"])}'
 
 
@@ -12253,6 +13880,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
           <a href="/admin">🏠 Dashboard</a>
           <a href="/admin/users">👥 Users</a>
           <a href="/admin/marketplace">📡 Marketplace</a>
+          <a href="/admin/access-token-keys">Access Token Keys <span class="nav-count">{available_access_token_key_count()}</span></a>
           <a href="/admin/payment-reviews">🧾 Pending Payments <span class="nav-count">{pending_payment_review_count()}</span></a>
           <a href="/admin/wallet-deposits">🏦 Wallet Deposits</a>
           <a href="/admin/payments">💳 Payment Settings</a>
@@ -12407,6 +14035,7 @@ def render_page(title: str, body: str, request: Request | None = None) -> HTMLRe
     .qr-id, .qr-detail-id {{ color:#93c5fd; font-weight:900; text-decoration:none; border-bottom:1px dashed #93c5fd; white-space:nowrap; display:inline-block; min-width:max-content; }}
     .qr-id:hover, .qr-detail-id:hover {{ color:#bfdbfe; border-bottom-color:#bfdbfe; }}
     .qr-detail-image {{ width:min(100%, 420px); border-radius:18px; border:1px solid var(--line); background:white; padding:10px; }}
+    .access-token-payload {{ white-space:pre-wrap; overflow-wrap:anywhere; background:#020617; border:1px solid var(--line); border-radius:12px; padding:14px; color:var(--text); font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
     .login-shell {{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:18px; }}
     .sidebar-overlay {{ display:none; }}
     .qr-modal {{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.72); z-index:2000; align-items:center; justify-content:center; padding:20px; }}
@@ -12637,13 +14266,56 @@ async def admin_qr_detail(request: Request, public_id: str):
         return guard
     row = get_photo_record(public_id)
     if not row:
-        return render_page("QR Detail", '<div class="card"><p>QR not found.</p></div>', request)
+        return render_page("Order Detail", '<div class="card"><p>Order not found.</p></div>', request)
     sender = get_admin_user_row(int(row["sender_chat_id"]))
     receiver_id = int(row["receiver_chat_id"] or 0)
     receiver = get_admin_user_row(receiver_id) if receiver_id else None
     sender_html = user_link(sender) if sender else esc(row["sender_chat_id"])
     receiver_html = user_link(receiver) if receiver else '<span class="muted">Unclaimed</span>'
     img_url = qr_image_url(public_id)
+    payload_type = order_payload_type(row)
+    payload_label = method_label(payload_type)
+    if payload_type == "access_token":
+        text_value = str(row["payload_text"] or "").strip()
+        item_preview = f'''
+    <div class="card">
+      <h3>Access Token content</h3>
+      <pre class="access-token-payload">{esc(text_value)}</pre>
+    </div>
+    '''
+    else:
+        item_preview = f'''
+    <div class="card">
+      <h3>QR image</h3>
+      <p><a class="btn" href="{esc(img_url)}" target="_blank" rel="noopener">Open QR image</a></p>
+      <img class="qr-detail-image" src="{esc(img_url)}" alt="Generated QR image for {esc(public_id)}">
+    </div>
+    '''
+    access_key_info = ""
+    if payload_type == "access_token":
+        key_row = assigned_access_token_key(public_id)
+        if key_row:
+            try:
+                key_plain = decrypt_access_token_key(str(key_row["key_ciphertext"]))
+                key_display = f'<code>{esc(key_plain)}</code>'
+            except Exception:
+                key_display = '<span class="badge bad">Decrypt failed</span>'
+            deliver_form = ""
+            if receiver_id and str(key_row["status"] or "").lower() == "reserved":
+                deliver_form = (
+                    f'<form class="inline" method="post" action="/admin/qrs/{esc(public_id)}/deliver-access-key" '
+                    'data-confirm-title="Deliver assigned key?" data-confirm-button="Deliver key" data-confirm-class="success" '
+                    'data-confirm-message="This sends the currently assigned Access Token key to the receiver.">'
+                    '<button class="success" type="submit">🔑 Deliver key to receiver</button></form>'
+                )
+            access_key_info = (
+                f'<p><strong>Assigned key:</strong><br>{key_display}</p>'
+                f'<p><strong>Key status:</strong> {access_token_key_status_html(key_row["status"])}</p>'
+                f'<p><strong>Key sent:</strong> {esc(display_datetime(key_row["sent_at"])) if key_row["sent_at"] else "No"}</p>'
+                f'{deliver_form}'
+            )
+        else:
+            access_key_info = '<p><strong>Assigned key:</strong><br><span class="muted">Not claimed yet</span></p>'
     offer_state = str(row["offer_state"] or "old").replace("_", " ").title()
     status_html = f'{status_pill(row["status"])} <span class="muted small">{esc(offer_state)}</span>'
     expire_form = ""
@@ -12658,11 +14330,12 @@ async def admin_qr_detail(request: Request, public_id: str):
     force_retry_forms = admin_qr_force_retry_forms(public_id, row)
     body = f'''
     <div class="card">
-      <h2>🆔 QR Detail</h2>
+      <h2>Order Detail</h2>
       <div class="row">
         <div>
           <p><strong>ID:</strong> <code>{esc(public_id)}</code></p>
-          <p><strong>Photo:</strong> {photo_no_html(row)}</p>
+          <p><strong>Type:</strong> {esc(payload_label)}</p>
+          <p><strong>Item:</strong> {photo_no_html(row)}</p>
           <p><strong>Status:</strong> {status_html}</p>
           <p><strong>Created:</strong> {esc(display_datetime(row["created_at"]))}</p>
           <p><strong>Claimed:</strong> {esc(display_datetime(row["claimed_at"])) if row["claimed_at"] else "—"}</p>
@@ -12675,24 +14348,21 @@ async def admin_qr_detail(request: Request, public_id: str):
         <div>
           <p><strong>Sender:</strong><br>{sender_html}</p>
           <p><strong>Receiver:</strong><br>{receiver_html}</p>
-          <p><strong>Sender rate:</strong> ${_money(row["sender_rate_usdt"])} USDT</p>
+          <p><strong>{esc(payload_label)} sender rate:</strong> ${_money(row["sender_rate_usdt"])} USDT</p>
           <p><strong>Order charge / reserved snapshot:</strong> ${_money(effective_sender_charge_amount(row, use_current_setting_if_missing=True))} USDT</p>
-          <p><strong>Receiver rate:</strong> ${_money(row["receiver_rate_usdt"])} USDT</p>
+          <p><strong>{esc(payload_label)} receiver rate:</strong> ${_money(row["receiver_rate_usdt"])} USDT</p>
           <p><strong>Reserved:</strong> ${_money(row["reserved_usdt"])} USDT</p>
+          {access_key_info}
         </div>
       </div>
     </div>
-    <div class="card">
-      <h3>QR image</h3>
-      <p><a class="btn" href="{esc(img_url)}" target="_blank" rel="noopener">Open QR image</a></p>
-      <img class="qr-detail-image" src="{esc(img_url)}" alt="Generated QR image for {esc(public_id)}">
-    </div>
+    {item_preview}
     '''
     with get_conn() as conn:
         disputes = conn.execute("SELECT * FROM disputes WHERE public_id = ? ORDER BY created_at DESC", (public_id,)).fetchall()
     body += '<div class="card"><h3>Linked disputes</h3>'
     if not disputes:
-        body += '<p class="muted">No disputes linked to this QR.</p>'
+        body += '<p class="muted">No disputes linked to this order.</p>'
     else:
         body += '<div class="table-wrap"><table><tr><th>ID</th><th>User</th><th>Role</th><th>Message</th><th>Status</th><th>Created</th></tr>'
         for d in disputes:
@@ -12701,7 +14371,7 @@ async def admin_qr_detail(request: Request, public_id: str):
             body += f'<tr><td>#{esc(ref)}</td><td>{user_link(d_user) if d_user else esc(d["chat_id"])}</td><td>{esc(d["role"] or "")}</td><td>{esc(d["message"])}</td><td>{dispute_status_pill(d["status"])}</td><td>{esc(display_datetime(d["created_at"]))}</td></tr>'
         body += '</table></div>'
     body += '</div>'
-    return render_page("QR Detail", body, request)
+    return render_page("Order Detail", body, request)
 
 
 @web_app.post("/admin/qrs/{public_id}/status")
@@ -12723,6 +14393,9 @@ async def admin_qr_status_override(request: Request, public_id: str):
     new_status = normalize_admin_order_status(submitted_status)
     failure_reason = str(form.get("failure_reason", "")).strip() or None
     ok, msg, result = admin_override_photo_status(public_id, new_status, failure_reason=failure_reason, status_by=0)
+    row_after = get_photo_record(public_id)
+    if ok and row_after is not None and order_payload_type(row_after) == "access_token":
+        finalize_access_token_key_for_order(public_id, new_status)
     if ok and result is not None and telegram_application is not None:
         sent, failed = await notify_admin_order_status_change(telegram_application.bot, result)
         msg += f" Notifications sent: {sent}, failed: {failed}."
@@ -12737,11 +14410,32 @@ async def admin_qr_force_release(request: Request, public_id: str):
     if guard:
         return guard
     ok, msg, result = admin_override_photo_status(public_id, "failed", failure_reason="Forced release by admin", status_by=0)
+    row_after = get_photo_record(public_id)
+    if ok and row_after is not None and order_payload_type(row_after) == "access_token":
+        finalize_access_token_key_for_order(public_id, "failed")
     if ok and result is not None and telegram_application is not None:
         sent, failed = await notify_admin_order_status_change(telegram_application.bot, result)
         msg += f" Notifications sent: {sent}, failed: {failed}."
     elif ok:
         msg += " Telegram bot is not ready, so notifications were not sent."
+    return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), msg)
+
+
+@web_app.post("/admin/qrs/{public_id}/deliver-access-key")
+async def admin_qr_deliver_access_key(request: Request, public_id: str):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    row = get_photo_record(public_id)
+    if not row or order_payload_type(row) != "access_token":
+        return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), "Access Token order not found.")
+    receiver_chat_id = int(row["receiver_chat_id"] or 0)
+    if receiver_chat_id <= 0:
+        return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), "No receiver has claimed this Access Token order yet.")
+    if telegram_application is None:
+        return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), "Telegram bot is not ready; cannot deliver the key right now.")
+    delivered = await deliver_access_token_key_to_receiver(telegram_application.bot, public_id, receiver_chat_id, force=True)
+    msg = "Assigned Access Token key delivered to receiver." if delivered else "Could not deliver the assigned Access Token key. Check bot logs or contact the receiver manually."
     return redirect_with_msg(admin_safe_return_path(request, f"/admin/qrs/{quote(public_id)}"), msg)
 
 
@@ -12875,7 +14569,7 @@ async def admin_dashboard(request: Request):
     body += '</div>'
     pending = pending_rows(limit=10)
     if pending:
-        body += '<div class="card"><h3>Recent pending</h3><div class="table-wrap"><table class="compact-table"><tr><th class="cell-center">ID</th><th class="photo-cell">Photo</th><th>Sender</th><th>Receiver</th><th class="cell-center">Status</th><th class="created-cell">Created</th></tr>'
+        body += '<div class="card"><h3>Recent pending</h3><div class="table-wrap"><table class="compact-table"><tr><th class="cell-center">ID</th><th class="photo-cell">Item</th><th>Sender</th><th>Receiver</th><th class="cell-center">Status</th><th class="created-cell">Created</th></tr>'
         for row in pending:
             sender = get_admin_user_row(int(row["sender_chat_id"]))
             receiver = get_admin_user_row(int(row["receiver_chat_id"] or 0))
@@ -13121,7 +14815,7 @@ async def admin_user_stats(request: Request, chat_id: int):
         recent = conn.execute(f"SELECT * FROM photos WHERE {field} = ? ORDER BY created_at DESC LIMIT 500", (chat_id,)).fetchall()
     if recent:
         paged_recent, recent_pager = paginate_items(list(recent), request)
-        body += '<div class="card recent-qrs"><h3>Recent QRs</h3><div class="table-wrap"><table class="compact-table"><tr><th class="cell-center">ID</th><th class="photo-cell">Photo</th><th>Sender</th><th>Receiver / Buyer</th><th class="cell-center">Status</th><th class="created-cell">Created</th><th class="completed-cell">Completed</th></tr>'
+        body += '<div class="card recent-qrs"><h3>Recent Orders</h3><div class="table-wrap"><table class="compact-table"><tr><th class="cell-center">ID</th><th class="photo-cell">Item</th><th>Sender</th><th>Receiver / Buyer</th><th class="cell-center">Status</th><th class="created-cell">Created</th><th class="completed-cell">Completed</th></tr>'
         for row in paged_recent:
             sender = get_admin_user_row(int(row["sender_chat_id"]))
             receiver = get_admin_user_row(int(row["receiver_chat_id"]))
@@ -13183,7 +14877,7 @@ async def admin_stats(request: Request):
         body += '<p>No QR data yet.</p>'
     else:
         paged_qrs, qr_pager = paginate_items(list(qr_rows), request, key="orders_page")
-        body += '<div class="table-wrap"><table class="compact-table"><tr><th class="cell-center">Order ID</th><th class="photo-cell">QR</th><th>Sender</th><th>Receiver</th><th class="cell-center">Offer</th><th class="cell-center">Status</th><th class="created-cell">Created</th><th class="created-cell">Claimed</th><th class="completed-cell">Completed / Failed</th><th class="cell-center">Duration</th><th>Failure reason</th></tr>'
+        body += '<div class="table-wrap"><table class="compact-table"><tr><th class="cell-center">Order ID</th><th class="photo-cell">Item</th><th>Sender</th><th>Receiver</th><th class="cell-center">Offer</th><th class="cell-center">Status</th><th class="created-cell">Created</th><th class="created-cell">Claimed</th><th class="completed-cell">Completed / Failed</th><th class="cell-center">Duration</th><th>Failure reason</th></tr>'
         for row in paged_qrs:
             sender = get_admin_user_row(int(row["sender_chat_id"]))
             receiver_id = row["receiver_chat_id"]
@@ -13257,7 +14951,7 @@ async def admin_pending(request: Request):
     if not rows:
         body += '<p>No pending QRs.</p>'
     else:
-        body += '<div class="table-wrap"><table><tr><th class="cell-center">ID</th><th class="photo-cell">Photo</th><th>Sender</th><th>Receiver</th><th class="cell-center">Status</th><th>Rates</th><th class="created-cell">Created</th><th class="completed-cell">Completed</th><th class="cell-center">Action</th></tr>'
+        body += '<div class="table-wrap"><table><tr><th class="cell-center">ID</th><th class="photo-cell">Item</th><th>Sender</th><th>Receiver</th><th class="cell-center">Status</th><th>Rates</th><th class="created-cell">Created</th><th class="completed-cell">Completed</th><th class="cell-center">Action</th></tr>'
         for r in paged_rows:
             sender = get_admin_user_row(int(r['sender_chat_id']))
             receiver_id = int(r['receiver_chat_id'] or 0)
@@ -13289,6 +14983,121 @@ async def admin_pending_expire(request: Request, public_id: str):
     return redirect_with_msg(admin_safe_return_path(request, "/admin/pending"), msg)
 
 
+def access_token_key_status_html(status: str) -> str:
+    value = str(status or "").strip().lower()
+    cls = "ok" if value == "available" else "warn" if value in {"reserved", "review"} else "bad" if value == "removed" else ""
+    return f'<span class="badge {cls}">{esc(value.title() or "Unknown")}</span>'
+
+
+@web_app.get("/admin/access-token-keys", response_class=HTMLResponse)
+async def admin_access_token_keys(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    counts = access_token_key_counts()
+    rows = list_access_token_keys(limit=500)
+    body = f'''
+    <div class="cards two">
+      <div class="card"><h3>Available</h3><p style="font-size:34px;margin:0;">{counts["available"]}</p><p class="muted">Keys ready for new Access Token claims</p></div>
+      <div class="card"><h3>Reserved</h3><p style="font-size:34px;margin:0;">{counts["reserved"]}</p><p class="muted">Assigned to claimed pending orders</p></div>
+      <div class="card"><h3>Used</h3><p style="font-size:34px;margin:0;">{counts["used"]}</p><p class="muted">Completed orders, never reused</p></div>
+      <div class="card"><h3>Review</h3><p style="font-size:34px;margin:0;">{counts["review"]}</p><p class="muted">Failed/expired claimed orders</p></div>
+    </div>
+    <div class="card">
+      <h2>Bulk add Access Token keys</h2>
+      <p class="muted small">Paste one key per line. Duplicate keys are skipped. Keys are encrypted before storage.</p>
+      <form method="post" action="/admin/access-token-keys/add">
+        <label>Keys</label>
+        <textarea name="keys" required placeholder="one key per line"></textarea>
+        <label>Note</label>
+        <input name="note" placeholder="optional batch note">
+        <button type="submit">Add keys</button>
+      </form>
+    </div>
+    <div class="card"><h2>Key pool</h2>
+    '''
+    if not rows:
+        body += '<p>No Access Token keys have been added.</p>'
+    else:
+        body += '<div class="table-wrap"><table class="compact-table"><tr><th>ID</th><th>Status</th><th>Key</th><th>Order</th><th>Receiver</th><th>Added</th><th>Reserved</th><th>Action</th></tr>'
+        for row in rows:
+            key_id = int(row["id"])
+            try:
+                plain = decrypt_access_token_key(str(row["key_ciphertext"]))
+                key_html = f'<code>{esc(plain)}</code>'
+            except Exception:
+                key_html = '<span class="badge bad">Decrypt failed</span>'
+            public_id = str(row["assigned_public_id"] or "")
+            order_html = qr_id_link(public_id) if public_id else '<span class="muted">Unassigned</span>'
+            receiver_id = int(row["assigned_receiver_chat_id"] or 0)
+            receiver_html = user_link(receiver_id) if receiver_id else '<span class="muted">-</span>'
+            status = str(row["status"] or "")
+            action = ""
+            if status in {"available", "review", "removed"}:
+                action += (
+                    f'<form class="inline" method="post" action="/admin/access-token-keys/{key_id}/remove" '
+                    'data-confirm-title="Remove key?" data-confirm-button="Remove" data-confirm-class="danger" '
+                    'data-confirm-message="Removed keys cannot be assigned to new orders."><button class="danger" type="submit">Remove</button></form>'
+                )
+            if status in {"review", "removed"}:
+                action += (
+                    f' <form class="inline" method="post" action="/admin/access-token-keys/{key_id}/restore" '
+                    'data-confirm-title="Restore key?" data-confirm-button="Restore" data-confirm-class="success" '
+                    'data-confirm-message="This key will become available for future Access Token orders."><button class="success" type="submit">Restore</button></form>'
+                )
+            action_html = action or '<span class="muted">Locked</span>'
+            body += (
+                f'<tr><td>#{key_id}</td><td>{access_token_key_status_html(status)}</td><td>{key_html}</td>'
+                f'<td>{order_html}</td><td>{receiver_html}</td><td>{esc(display_datetime(row["added_at"]))}</td>'
+                f'<td>{esc(display_datetime(row["reserved_at"])) if row["reserved_at"] else "-"}</td><td>{action_html}</td></tr>'
+            )
+        body += '</table></div>'
+    body += '</div>'
+    return render_page("Access Token Keys", body, request)
+
+
+@web_app.post("/admin/access-token-keys/add")
+async def admin_access_token_keys_add(request: Request):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    form = await request.form()
+    added, duplicates, skipped = bulk_add_access_token_keys(str(form.get("keys", "")), str(form.get("note", "")))
+    if available_access_token_key_count() >= ACCESS_TOKEN_KEY_LOW_THRESHOLD:
+        set_admin_setting("access_token_key_low_notified_at", "")
+    notified = ""
+    if added > 0 and telegram_application is not None:
+        sent, failed = await notify_access_token_waitlist_if_available(telegram_application.bot)
+        if sent or failed:
+            notified = f" Waitlist notified: {sent}, failed: {failed}."
+    return redirect_with_msg("/admin/access-token-keys", f"Added {added}, duplicates {duplicates}, skipped {skipped}.{notified}")
+
+
+@web_app.post("/admin/access-token-keys/{key_id}/remove")
+async def admin_access_token_key_remove(request: Request, key_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    ok = remove_access_token_key(key_id)
+    if telegram_application is not None:
+        await notify_admins_low_access_token_keys(telegram_application.bot)
+    return redirect_with_msg("/admin/access-token-keys", "Key removed." if ok else "Key could not be removed.")
+
+
+@web_app.post("/admin/access-token-keys/{key_id}/restore")
+async def admin_access_token_key_restore(request: Request, key_id: int):
+    guard = admin_guard(request)
+    if guard:
+        return guard
+    ok = restore_access_token_key(key_id)
+    notified = ""
+    if ok and telegram_application is not None:
+        sent, failed = await notify_access_token_waitlist_if_available(telegram_application.bot)
+        if sent or failed:
+            notified = f" Waitlist notified: {sent}, failed: {failed}."
+    return redirect_with_msg("/admin/access-token-keys", ("Key restored." if ok else "Key could not be restored.") + notified)
+
+
 @web_app.get("/admin/marketplace", response_class=HTMLResponse)
 async def admin_marketplace(request: Request):
     guard = admin_guard(request)
@@ -13305,8 +15114,10 @@ async def admin_marketplace(request: Request):
       <p class="muted">Pairing is disabled. Sender QRs become open offers for online receivers.</p>
       <form method="post" action="/admin/marketplace/settings">
         <div class="row">
-          <div><label>Sender charge / done scan (USDT)</label><input name="sender_rate_usdt" value="{esc(_money(settings['sender_rate_usdt']))}"></div>
-          <div><label>Receiver earning / done scan (USDT)</label><input name="receiver_rate_usdt" value="{esc(_money(settings['receiver_rate_usdt']))}"></div>
+          <div><label>QR sender charge / done (USDT)</label><input name="sender_rate_usdt" value="{esc(_money(settings['qr_sender_rate_usdt']))}"></div>
+          <div><label>QR receiver earning / done (USDT)</label><input name="receiver_rate_usdt" value="{esc(_money(settings['qr_receiver_rate_usdt']))}"></div>
+          <div><label>Access Token sender charge / done (USDT)</label><input name="access_token_sender_rate_usdt" value="{esc(_money(settings['access_token_sender_rate_usdt']))}"></div>
+          <div><label>Access Token receiver earning / done (USDT)</label><input name="access_token_receiver_rate_usdt" value="{esc(_money(settings['access_token_receiver_rate_usdt']))}"></div>
           <div><label>Minimum payout request (USDT)</label><input name="min_payout_usdt" value="{esc(_money(settings['min_payout_usdt']))}"></div>
         </div>
         <button type="submit">💾 Save marketplace settings</button>
@@ -13352,7 +15163,7 @@ async def admin_marketplace_settings(request: Request):
     if guard:
         return guard
     form = await request.form()
-    for key in ("sender_rate_usdt", "receiver_rate_usdt", "min_payout_usdt"):
+    for key in ("sender_rate_usdt", "receiver_rate_usdt", "access_token_sender_rate_usdt", "access_token_receiver_rate_usdt", "min_payout_usdt"):
         set_admin_setting(key, str(form.get(key, "")).strip())
     return redirect_with_msg("/admin/marketplace", "Marketplace settings saved.")
 
@@ -13391,6 +15202,10 @@ async def admin_marketplace_receiver(request: Request):
             except TelegramError:
                 failed += 1
         note += f" Sender notifications sent: {sent}, failed: {failed}."
+        if online:
+            wait_sent, wait_failed = await notify_access_token_waitlist_if_available(telegram_application.bot)
+            if wait_sent or wait_failed:
+                note += f" Access Token waitlist notified: {wait_sent}, failed: {wait_failed}."
     return redirect_with_msg("/admin/marketplace", note)
 
 
@@ -15526,6 +17341,7 @@ async def admin_settings(request: Request):
       <form method="post" action="/admin/settings/bot-timing">
         <div class="row">
           <div><label>QR expire minutes</label><input name="qr_expire_minutes" value="{esc(settings['qr_expire_minutes'])}"></div>
+          <div><label>Access Token expire minutes</label><input name="access_token_expire_minutes" value="{esc(settings['access_token_expire_minutes'])}"></div>
           <div><label>Payment timeout minutes</label><input name="payment_timeout_minutes" value="{esc(settings['payment_timeout_minutes'])}"></div>
           <div><label>Payment reminder minutes</label><input name="payment_reminder_minutes" value="{esc(settings['payment_reminder_minutes'])}"></div>
           <div><label>USDT verify interval seconds</label><input name="payment_watch_interval_seconds" value="{esc(settings['payment_watch_interval_seconds'])}"></div>
@@ -15533,7 +17349,7 @@ async def admin_settings(request: Request):
         </div>
         <button type="submit">💾 Save bot timing</button>
       </form>
-      <p class="muted small">QR expire minutes applies to each QR from sender upload time and expires it even if a receiver already accepted it. Payment timeout/reminder and verification interval apply to wallet top-up sessions.</p>
+      <p class="muted small">QR and Access Token expiry apply from sender submission time and expire the order even if a receiver already accepted it. Payment timeout/reminder and verification interval apply to wallet top-up sessions.</p>
     </div>
 
     <div class="card"><h3>💸 Receiver withdrawal settings</h3>
@@ -15632,6 +17448,7 @@ async def admin_settings_bot_timing(request: Request):
     form = await request.form()
     values = {
         "qr_expire_minutes": str(form.get("qr_expire_minutes", QR_EXPIRE_MINUTES)).strip(),
+        "access_token_expire_minutes": str(form.get("access_token_expire_minutes", ACCESS_TOKEN_EXPIRE_MINUTES)).strip(),
         "payment_timeout_minutes": str(form.get("payment_timeout_minutes", PAYMENT_TIMEOUT_MINUTES)).strip(),
         "payment_reminder_minutes": str(form.get("payment_reminder_minutes", PAYMENT_REMINDER_MINUTES)).strip(),
         "payment_watch_interval_seconds": str(form.get("payment_watch_interval_seconds", PAYMENT_WATCH_INTERVAL_SECONDS)).strip(),
@@ -15639,6 +17456,7 @@ async def admin_settings_bot_timing(request: Request):
     }
     minimums = {
         "qr_expire_minutes": 1,
+        "access_token_expire_minutes": 1,
         "payment_timeout_minutes": 1,
         "payment_reminder_minutes": 0,
         "payment_watch_interval_seconds": 10,
@@ -15764,6 +17582,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
     common = [
         ("start", "Open main menu"),
         ("commands", "Show commands"),
+        ("cancel", "Cancel current action"),
         ("support", "Open support contact"),
         ("language", "Change language"),
         ("messages", "Preset marketplace messages"),
@@ -15775,6 +17594,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
     ]
     if role == "sender":
         return common + [
+            ("send", "Choose QR or Access Token submission"),
             ("status", "Show marketplace capacity"),
             ("wallet", "Show wallet balance"),
             ("loadwallet", "Top-up your wallet"),
@@ -15792,6 +17612,7 @@ def bot_commands_for_role(role: str | None) -> list[tuple[str, str]]:
         ]
     if role == "admin":
         return common + [
+            ("send", "Choose QR or Access Token submission"),
             ("status", "Show marketplace capacity"),
             ("wallet", "Show wallet balance"),
             ("loadwallet", "Top-up your wallet"),
@@ -15842,12 +17663,14 @@ def build_application() -> Application:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("commands", commands_cmd))
+    app.add_handler(CommandHandler("cancel", cancel_cmd))
     app.add_handler(CommandHandler("support", support_cmd))
     app.add_handler(CommandHandler("language", language_cmd))
     app.add_handler(CommandHandler("messages", messages_cmd))
     app.add_handler(CommandHandler("myid", myid))
     app.add_handler(CommandHandler("status", marketplace_status_cmd))
     app.add_handler(CommandHandler("wallet", wallet_cmd))
+    app.add_handler(CommandHandler("send", send_cmd))
     app.add_handler(CommandHandler("loadwallet", loadwallet_cmd))
     app.add_handler(CommandHandler("on", on_cmd))
     app.add_handler(CommandHandler("limit", limit_cmd))
@@ -15867,6 +17690,7 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(wallet_history_button, pattern=r"^wallet_history:"))
     app.add_handler(CallbackQueryHandler(qr_history_button, pattern=r"^qr_history:"))
     app.add_handler(CallbackQueryHandler(withdraw_button, pattern=r"^withdraw:"))
+    app.add_handler(CallbackQueryHandler(send_method_button, pattern=r"^sendmethod:"))
     app.add_handler(CallbackQueryHandler(admin_poll_closed_button, pattern=r"^adminpoll_closed:"))
     app.add_handler(CallbackQueryHandler(admin_poll_answer_button, pattern=r"^adminpoll:"))
     app.add_handler(CallbackQueryHandler(preset_send_button, pattern=r"^msgsend:"))

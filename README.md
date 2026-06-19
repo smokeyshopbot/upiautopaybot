@@ -27,6 +27,7 @@ The Telegram bot is user-only. Admin controls live in the web panel.
 ```text
 /start
 /myid
+/send
 /status
 /wallet
 /loadwallet
@@ -34,6 +35,8 @@ The Telegram bot is user-only. Admin controls live in the web panel.
 /stats
 /dispute
 ```
+
+`/send` opens the submission menu. It shows available methods such as QR and Access Token with the current sender price on each button. Directly sending a QR photo still works as before.
 
 ### Receiver commands
 
@@ -53,6 +56,50 @@ The Telegram bot is user-only. Admin controls live in the web panel.
 ```
 
 Receivers are automatically set offline when their remaining limit reaches zero.
+
+## User API
+
+The same bot process can accept QR uploads and disputes over HTTP. Set per-user API keys:
+
+```env
+API_KEYS=strong_sender_token:123456789,strong_receiver_token:987654321
+API_MAX_UPLOAD_BYTES=5242880
+```
+
+Use the Telegram numeric chat ID of an already active bot user. QR uploads require the linked user to be an active sender. Uploaded API images are processed in memory, validated with the same QR rules, rebuilt as a clean QR, and discarded; the rest of the marketplace flow stays the same.
+
+Submit a QR:
+
+```bash
+curl -X POST https://your-app.example.com/api/v1/qrs \
+  -H "Authorization: Bearer strong_sender_token" \
+  -F "file=@mandate_qr.png"
+```
+
+Check a QR:
+
+```bash
+curl https://your-app.example.com/api/v1/qrs/2026-06-19-0001 \
+  -H "Authorization: Bearer strong_sender_token"
+```
+
+Open a dispute after an order is done or failed:
+
+```bash
+curl -X POST https://your-app.example.com/api/v1/disputes \
+  -H "Authorization: Bearer strong_sender_token" \
+  -H "Content-Type: application/json" \
+  -d '{"public_id":"2026-06-19-0001","message":"Receiver marked failed incorrectly."}'
+```
+
+Reply to a dispute:
+
+```bash
+curl -X POST https://your-app.example.com/api/v1/disputes/DSP260619ABC123/replies \
+  -H "Authorization: Bearer strong_sender_token" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Adding more details for admin."}'
+```
 
 ## Web admin panel
 
@@ -127,6 +174,8 @@ Wallet addresses, Binance Pay ID/name, tolerances, and minimum top-up are saved 
 QR_EXPIRE_MINUTES=5
 DEFAULT_SENDER_RATE_USDT=0.50
 DEFAULT_RECEIVER_RATE_USDT=0
+DEFAULT_ACCESS_TOKEN_SENDER_RATE_USDT=0.50
+DEFAULT_ACCESS_TOKEN_RECEIVER_RATE_USDT=0
 DEFAULT_MIN_PAYOUT_USDT=1
 DEFAULT_MIN_WALLET_TOPUP_USDT=1
 BEP20_MANUAL_TOLERANCE_USDT=0.01
