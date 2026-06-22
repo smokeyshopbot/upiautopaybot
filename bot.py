@@ -53,7 +53,7 @@ try:
 except ImportError:  # Older python-telegram-bot fallback; long-token web copy links still work.
     CopyTextButton = None
 from telegram.constants import ChatType
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Header
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 import uvicorn
@@ -126,6 +126,7 @@ MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "").strip() or "upi_autopay_bot"
 MONGO_STATE_COLLECTION = os.getenv("MONGO_STATE_COLLECTION", "bot_state").strip() or "bot_state"
 MONGO_SNAPSHOT_ID = os.getenv("MONGO_SNAPSHOT_ID", "upi_autopay_main").strip() or "upi_autopay_main"
 MONGO_SYNC_ON_COMMIT = os.getenv("MONGO_SYNC_ON_COMMIT", "true").strip().lower() in {"1", "true", "yes", "on"}
+MONGO_SYNC_DEBOUNCE_SECONDS = float(os.getenv("MONGO_SYNC_DEBOUNCE_SECONDS", "2"))
 MONGO_TLS_ALLOW_INVALID_CERTIFICATES = os.getenv("MONGO_TLS_ALLOW_INVALID_CERTIFICATES", "false").strip().lower() in {"1", "true", "yes", "on"}
 # When MongoDB is enabled, this is only a local runtime cache restored from/synced to MongoDB.
 DB_PATH = os.getenv("DB_PATH", "/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db").strip() or ("/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db")
@@ -225,7 +226,8 @@ DEFAULT_QR_METHOD_ENABLED = os.getenv("QR_METHOD_ENABLED", "true").strip().lower
 DEFAULT_ACCESS_TOKEN_METHOD_ENABLED = os.getenv("ACCESS_TOKEN_METHOD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 ACCESS_TOKEN_KEY_LOW_THRESHOLD = int(os.getenv("ACCESS_TOKEN_KEY_LOW_THRESHOLD", "10"))
 ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS = int(os.getenv("ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS", "3600"))
-OFFER_TIMER_REFRESH_SECONDS = int(os.getenv("OFFER_TIMER_REFRESH_SECONDS", "5"))
+OFFER_TIMER_REFRESH_ENABLED = os.getenv("OFFER_TIMER_REFRESH_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+OFFER_TIMER_REFRESH_SECONDS = int(os.getenv("OFFER_TIMER_REFRESH_SECONDS", "30"))
 DEFAULT_MIN_PAYOUT_USDT = os.getenv("DEFAULT_MIN_PAYOUT_USDT", "1").strip() or "1"
 DEFAULT_MIN_WALLET_TOPUP_USDT = os.getenv("DEFAULT_MIN_WALLET_TOPUP_USDT", "1").strip() or "1"
 DEFAULT_BEP20_MANUAL_TOLERANCE_USDT = os.getenv("BEP20_MANUAL_TOLERANCE_USDT", "0.01").strip() or "0.01"
@@ -248,12 +250,43 @@ BINANCE_PAY_HISTORY_LOOKBACK_SECONDS = int(os.getenv("BINANCE_PAY_HISTORY_LOOKBA
 BINANCE_RECV_WINDOW_MS = int(os.getenv("BINANCE_RECV_WINDOW_MS", "5000"))
 API_KEYS_RAW = os.getenv("API_KEYS", "").strip()
 API_MAX_UPLOAD_BYTES = int(os.getenv("API_MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))
+NOTIFY_ACTIVE_SENDERS_CONCURRENCY = int(os.getenv("NOTIFY_ACTIVE_SENDERS_CONCURRENCY", "8"))
+NOTIFY_SEND_TIMEOUT_SECONDS = float(os.getenv("NOTIFY_SEND_TIMEOUT_SECONDS", "20"))
+TELEGRAM_CONCURRENT_UPDATES = int(os.getenv("TELEGRAM_CONCURRENT_UPDATES", "16"))
+TELEGRAM_CONNECTION_POOL_SIZE = int(os.getenv("TELEGRAM_CONNECTION_POOL_SIZE", "128"))
+TELEGRAM_POOL_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_POOL_TIMEOUT_SECONDS", "10"))
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     level=getattr(logging, LOG_LEVEL, logging.INFO),
 )
 logger = logging.getLogger("upi_autopay_bot")
+
+
+class RedactTelegramTokenFilter(logging.Filter):
+    """Keep bot tokens out of logs emitted by httpx/python-telegram-bot."""
+
+    _patterns = (
+        (re.compile(r"(https://api\.telegram\.org/bot)[^/\s\"]+"), r"\1<redacted>"),
+        (re.compile(r"\bbot\d{6,}:[A-Za-z0-9_-]{20,}"), "bot<redacted>"),
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = message
+        for pattern, replacement in self._patterns:
+            redacted = pattern.sub(replacement, redacted)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+_telegram_token_redactor = RedactTelegramTokenFilter()
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_telegram_token_redactor)
+for _logger_name in ("httpx", "telegram", "telegram.ext"):
+    logging.getLogger(_logger_name).addFilter(_telegram_token_redactor)
 
 
 # -----------------------------
@@ -268,6 +301,9 @@ _mongo_sync_lock = threading.RLock()
 _mongo_restored_once = False
 _mongo_last_synced_fingerprint: tuple[int, int] | None = None
 _mongo_sync_in_progress = False
+_mongo_sync_task: asyncio.Task | None = None
+_mongo_sync_pending = False
+_mongo_sync_force_pending = False
 _admin_poll_tables_ready = False
 
 
@@ -380,6 +416,7 @@ def sync_db_to_mongo(force: bool = False) -> None:
             return
         _mongo_sync_in_progress = True
         try:
+            started = time.monotonic()
             stat = os.stat(db_path)
             fingerprint = (stat.st_mtime_ns, stat.st_size)
             if not force and _mongo_last_synced_fingerprint == fingerprint:
@@ -418,11 +455,61 @@ def sync_db_to_mongo(force: bool = False) -> None:
                 except Exception:
                     logger.debug("Could not delete previous MongoDB SQLite snapshot", exc_info=True)
             _mongo_last_synced_fingerprint = fingerprint
-            logger.debug("Synced database snapshot to MongoDB: %s bytes", len(data))
+            duration = time.monotonic() - started
+            if duration >= 1.0:
+                logger.info("Synced database snapshot to MongoDB: %s bytes in %.2fs", len(data), duration)
+            else:
+                logger.debug("Synced database snapshot to MongoDB: %s bytes in %.2fs", len(data), duration)
         except PyMongoError as exc:
             raise RuntimeError(f"MongoDB database sync failed: {exc}") from exc
         finally:
             _mongo_sync_in_progress = False
+
+
+async def _mongo_sync_worker() -> None:
+    """Debounce Mongo snapshot uploads so user-facing handlers do not wait on GridFS."""
+    global _mongo_sync_pending, _mongo_sync_force_pending
+    while True:
+        delay = max(0.0, float(MONGO_SYNC_DEBOUNCE_SECONDS or 0))
+        if delay:
+            await asyncio.sleep(delay)
+        force = _mongo_sync_force_pending
+        _mongo_sync_pending = False
+        _mongo_sync_force_pending = False
+        try:
+            await asyncio.to_thread(sync_db_to_mongo, force)
+        except Exception:
+            logger.exception("Background MongoDB database sync failed")
+        if not _mongo_sync_pending:
+            return
+
+
+def request_mongo_sync(force: bool = False) -> None:
+    """Request a MongoDB snapshot upload without blocking the current handler."""
+    global _mongo_sync_task, _mongo_sync_pending, _mongo_sync_force_pending
+    if not _mongo_configured() or (not MONGO_SYNC_ON_COMMIT and not force):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        sync_db_to_mongo(force=force)
+        return
+
+    _mongo_sync_pending = True
+    _mongo_sync_force_pending = _mongo_sync_force_pending or bool(force)
+    if _mongo_sync_task is None or _mongo_sync_task.done():
+        _mongo_sync_task = loop.create_task(_mongo_sync_worker(), name="mongo_snapshot_sync")
+
+
+async def flush_pending_mongo_sync() -> None:
+    task = _mongo_sync_task
+    if task is not None and not task.done():
+        try:
+            await task
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Pending MongoDB database sync failed")
 
 
 class MongoSyncedSQLiteConnection(sqlite3.Connection):
@@ -430,12 +517,12 @@ class MongoSyncedSQLiteConnection(sqlite3.Connection):
 
     def commit(self) -> None:  # type: ignore[override]
         super().commit()
-        sync_db_to_mongo()
+        request_mongo_sync()
 
     def __exit__(self, exc_type, exc, tb):  # type: ignore[override]
         result = super().__exit__(exc_type, exc, tb)
         if exc_type is None:
-            sync_db_to_mongo()
+            request_mongo_sync()
         return result
 
 
@@ -4945,21 +5032,34 @@ async def notify_access_token_waitlist_if_available(bot) -> tuple[int, int]:
         rows = conn.execute(
             "SELECT chat_id FROM access_token_waitlist WHERE notified_at IS NULL ORDER BY created_at ASC LIMIT 200"
         ).fetchall()
+    if not rows:
+        return 0, 0
     sent = failed = 0
-    for row in rows:
-        chat_id = int(row["chat_id"])
-        try:
-            await bot.send_message(
+    attempted_chat_ids = [int(row["chat_id"]) for row in rows]
+    semaphore = asyncio.Semaphore(max(1, int(NOTIFY_ACTIVE_SENDERS_CONCURRENCY or 8)))
+
+    async def send_one(chat_id: int) -> bool:
+        async with semaphore:
+            return await send_message_with_retry(
+                bot,
                 chat_id=chat_id,
                 text=tr_chat(chat_id, "access_token_scans_available", count=count),
                 protect_content=PROTECT_CONTENT,
+                log_label="Access Token waitlist notification",
             )
+
+    results = await asyncio.gather(*(send_one(chat_id) for chat_id in attempted_chat_ids))
+    for ok in results:
+        if ok:
             sent += 1
-        except TelegramError as exc:
-            logger.warning("Could not notify Access Token waitlist user %s: %s", chat_id, exc)
+        else:
             failed += 1
-        with get_conn() as conn:
-            conn.execute("UPDATE access_token_waitlist SET notified_at = ? WHERE chat_id = ?", (now_iso(), chat_id))
+    with get_conn() as conn:
+        now = now_iso()
+        conn.executemany(
+            "UPDATE access_token_waitlist SET notified_at = ? WHERE chat_id = ?",
+            [(now, chat_id) for chat_id in attempted_chat_ids],
+        )
     return sent, failed
 
 
@@ -9525,20 +9625,100 @@ async def admin_poll_closed_button(update: Update, context: ContextTypes.DEFAULT
 # -----------------------------
 
 
-async def notify_active_senders(context: ContextTypes.DEFAULT_TYPE, text: str | None = None, *, key: str | None = None, **kwargs) -> tuple[int, int]:
+async def send_message_with_retry(
+    bot,
+    *,
+    chat_id: int,
+    text: str,
+    protect_content: bool = PROTECT_CONTENT,
+    log_label: str = "message",
+) -> bool:
+    timeout = max(3.0, float(NOTIFY_SEND_TIMEOUT_SECONDS or 20))
+    for attempt in range(2):
+        try:
+            await asyncio.wait_for(
+                bot.send_message(chat_id=chat_id, text=text, protect_content=protect_content),
+                timeout=timeout,
+            )
+            return True
+        except RetryAfter as exc:
+            retry_after_raw = getattr(exc, "retry_after", 1) or 1
+            if hasattr(retry_after_raw, "total_seconds"):
+                retry_after = float(retry_after_raw.total_seconds())
+            else:
+                retry_after = float(retry_after_raw)
+            if attempt == 0:
+                await asyncio.sleep(min(retry_after, 5.0))
+                continue
+            logger.warning("Telegram retry limit while sending %s to %s: %s", log_label, chat_id, exc)
+        except asyncio.TimeoutError:
+            logger.warning("Timed out sending %s to %s after %.1fs", log_label, chat_id, timeout)
+        except TelegramError as exc:
+            logger.warning("Could not send %s to %s: %s", log_label, chat_id, exc)
+        return False
+    return False
+
+
+async def notify_active_senders_by_bot(bot, text: str | None = None, *, key: str | None = None, **kwargs) -> tuple[int, int]:
     sent = 0
     failed = 0
-    for sender in active_senders():
+    senders = active_senders()
+    if not senders:
+        return 0, 0
+    semaphore = asyncio.Semaphore(max(1, int(NOTIFY_ACTIVE_SENDERS_CONCURRENCY or 8)))
+
+    async def send_one(sender: sqlite3.Row) -> bool:
         sender_chat_id = int(sender["chat_id"])
         msg_text = tr_chat(sender_chat_id, key, **kwargs) if key else str(text or "")
-        try:
-            await context.bot.send_message(chat_id=sender_chat_id, text=msg_text, protect_content=PROTECT_CONTENT)
+        async with semaphore:
+            return await send_message_with_retry(
+                bot,
+                chat_id=sender_chat_id,
+                text=msg_text,
+                protect_content=PROTECT_CONTENT,
+                log_label="sender notification",
+            )
+
+    results = await asyncio.gather(*(send_one(sender) for sender in senders))
+    for ok in results:
+        if ok:
             sent += 1
-            await asyncio.sleep(0.03)
-        except TelegramError as exc:
-            logger.warning("Could not notify sender %s: %s", sender["chat_id"], exc)
+        else:
             failed += 1
     return sent, failed
+
+
+async def notify_active_senders(context: ContextTypes.DEFAULT_TYPE, text: str | None = None, *, key: str | None = None, **kwargs) -> tuple[int, int]:
+    return await notify_active_senders_by_bot(context.bot, text, key=key, **kwargs)
+
+
+def schedule_active_sender_notification(bot, reason: str, text: str | None = None, *, key: str | None = None, **kwargs) -> None:
+    async def _runner() -> None:
+        try:
+            sent, failed = await notify_active_senders_by_bot(bot, text, key=key, **kwargs)
+            logger.info("%s sender notifications completed: sent=%s failed=%s", reason, sent, failed)
+        except Exception:
+            logger.exception("%s sender notifications failed", reason)
+
+    try:
+        asyncio.create_task(_runner(), name=f"{reason}_sender_notifications")
+    except TypeError:
+        asyncio.create_task(_runner())
+
+
+def schedule_access_token_waitlist_notification(bot, reason: str) -> None:
+    async def _runner() -> None:
+        try:
+            sent, failed = await notify_access_token_waitlist_if_available(bot)
+            if sent or failed:
+                logger.info("%s Access Token waitlist notifications completed: sent=%s failed=%s", reason, sent, failed)
+        except Exception:
+            logger.exception("%s Access Token waitlist notifications failed", reason)
+
+    try:
+        asyncio.create_task(_runner(), name=f"{reason}_access_token_waitlist")
+    except TypeError:
+        asyncio.create_task(_runner())
 
 
 async def on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9559,15 +9739,14 @@ async def on_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     set_receiver_online(chat_id, limit)
     await update.message.reply_text(tr_chat(chat_id, "receiver_online", limit=limit))
-    sent, failed = await notify_active_senders(
-        context,
+    schedule_active_sender_notification(
+        context.bot,
+        f"Receiver {chat_id} online",
         key="notify_receiver_online",
         capacity=total_marketplace_capacity(),
     )
-    wait_sent, wait_failed = await notify_access_token_waitlist_if_available(context.bot)
-    if wait_sent or wait_failed:
-        logger.info("Access Token waitlist notified after receiver online: sent=%s failed=%s", wait_sent, wait_failed)
-    logger.info("Receiver %s online; notified senders sent=%s failed=%s", chat_id, sent, failed)
+    schedule_access_token_waitlist_notification(context.bot, f"Receiver {chat_id} online")
+    logger.info("Receiver %s online; sender notifications scheduled", chat_id)
 
 
 async def off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9581,11 +9760,12 @@ async def off_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     set_receiver_offline(chat_id)
     await update.message.reply_text(tr_chat(chat_id, "receiver_offline"))
-    sent, failed = await notify_active_senders(
-        context,
+    schedule_active_sender_notification(
+        context.bot,
+        f"Receiver {chat_id} offline",
         key="notify_receiver_offline",
     )
-    logger.info("Receiver %s offline; notified senders sent=%s failed=%s", chat_id, sent, failed)
+    logger.info("Receiver %s offline; sender notifications scheduled", chat_id)
 
 
 async def limit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -9623,18 +9803,17 @@ async def limit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Notify senders when marketplace receiver capacity changes. Do not include
     # receiver names, usernames, or chat IDs; only publish the capacity change.
     notify_key = "notify_receiver_limit_added" if delta > 0 else "notify_receiver_limit_reduced"
-    sent, failed = await notify_active_senders(
-        context,
+    schedule_active_sender_notification(
+        context.bot,
+        f"Receiver {chat_id} limit change",
         key=notify_key,
         change=abs(delta),
         capacity=total_marketplace_capacity(),
     )
     logger.info(
-        "Receiver %s adjusted limit by %+d; notified senders sent=%s failed=%s",
+        "Receiver %s adjusted limit by %+d; sender notifications scheduled",
         chat_id,
         delta,
-        sent,
-        failed,
     )
 
 
@@ -11616,6 +11795,8 @@ async def refresh_open_offer_timer_after_delay(application: Application, public_
 def schedule_open_offer_timer_refresh_task(application: Application | None, public_id: str) -> None:
     if application is None:
         return
+    if not OFFER_TIMER_REFRESH_ENABLED:
+        return
     try:
         application.create_task(
             refresh_open_offer_timer_after_delay(application, public_id),
@@ -11735,6 +11916,8 @@ async def refresh_claimed_order_timer_after_delay(application: Application, publ
 
 def schedule_claimed_order_timer_refresh_task(application: Application | None, public_id: str) -> None:
     if application is None:
+        return
+    if not OFFER_TIMER_REFRESH_ENABLED:
         return
     try:
         application.create_task(
@@ -12579,7 +12762,11 @@ async def claim_offer_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
             chat_id=receiver_chat_id,
             text=tr_chat(receiver_chat_id, "auto_off_limit_zero"),
         )
-        await notify_active_senders(context, tr_chat(None, "sender_notify_limit_zero"))
+        schedule_active_sender_notification(
+            context.bot,
+            f"Receiver {receiver_chat_id} auto-off",
+            tr_chat(None, "sender_notify_limit_zero"),
+        )
 
 
 async def cancel_order_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -13101,8 +13288,9 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
 async def marketplace_watcher(application: Application) -> None:
     while True:
         try:
-            for row in list_claimed_orders_for_timer_refresh(limit=100):
-                await refresh_claimed_order_timer_once(application.bot, str(row["public_id"]), row)
+            if OFFER_TIMER_REFRESH_ENABLED:
+                for row in list_claimed_orders_for_timer_refresh(limit=100):
+                    await refresh_claimed_order_timer_once(application.bot, str(row["public_id"]), row)
             for row in list_claimed_qrs_needing_expiry_warning(limit=100):
                 await send_receiver_expiry_warning(application.bot, row)
             for row in list_pending_qrs_to_expire(limit=100):
@@ -15556,9 +15744,8 @@ async def admin_access_token_keys_add(request: Request):
         set_admin_setting("access_token_key_low_notified_at", "")
     notified = ""
     if added > 0 and telegram_application is not None:
-        sent, failed = await notify_access_token_waitlist_if_available(telegram_application.bot)
-        if sent or failed:
-            notified = f" Waitlist notified: {sent}, failed: {failed}."
+        schedule_access_token_waitlist_notification(telegram_application.bot, "Admin added Access Token keys")
+        notified = " Waitlist notification scheduled."
     return redirect_with_msg("/admin/access-token-keys", f"Added {added}, duplicates {duplicates}, skipped {skipped}.{notified}")
 
 
@@ -15581,9 +15768,8 @@ async def admin_access_token_key_restore(request: Request, key_id: int):
     ok = restore_access_token_key(key_id)
     notified = ""
     if ok and telegram_application is not None:
-        sent, failed = await notify_access_token_waitlist_if_available(telegram_application.bot)
-        if sent or failed:
-            notified = f" Waitlist notified: {sent}, failed: {failed}."
+        schedule_access_token_waitlist_notification(telegram_application.bot, "Admin restored Access Token key")
+        notified = " Waitlist notification scheduled."
     return redirect_with_msg("/admin/access-token-keys", ("Key restored." if ok else "Key could not be restored.") + notified)
 
 
@@ -15759,20 +15945,16 @@ async def admin_marketplace_receiver(request: Request):
     if maintenance_mode_enabled():
         note += " Maintenance mode is ON, so sender notifications were not sent."
     elif telegram_application is not None and notify_text:
-        sent = failed = 0
-        for sender in active_senders():
-            try:
-                sender_chat_id = int(sender["chat_id"])
-                await telegram_application.bot.send_message(chat_id=sender_chat_id, text=tr_chat(sender_chat_id, notify_key, **notify_kwargs), protect_content=PROTECT_CONTENT)
-                sent += 1
-                await asyncio.sleep(0.03)
-            except TelegramError:
-                failed += 1
-        note += f" Sender notifications sent: {sent}, failed: {failed}."
+        schedule_active_sender_notification(
+            telegram_application.bot,
+            f"Admin {notify_text}",
+            key=notify_key,
+            **notify_kwargs,
+        )
+        note += " Sender notifications were scheduled."
         if online:
-            wait_sent, wait_failed = await notify_access_token_waitlist_if_available(telegram_application.bot)
-            if wait_sent or wait_failed:
-                note += f" Access Token waitlist notified: {wait_sent}, failed: {wait_failed}."
+            schedule_access_token_waitlist_notification(telegram_application.bot, f"Admin {notify_text}")
+            note += " Access Token waitlist notifications were scheduled."
     return redirect_with_msg("/admin/marketplace", note)
 
 
@@ -18122,6 +18304,7 @@ async def web_shutdown() -> None:
                 await telegram_application.bot.delete_webhook(drop_pending_updates=False)
             await telegram_application.stop()
             await telegram_application.shutdown()
+            await flush_pending_mongo_sync()
     finally:
         telegram_application = None
         close_mongo_storage()
@@ -18226,7 +18409,15 @@ async def set_bot_commands(application: Application) -> None:
 
 
 def build_application() -> Application:
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .concurrent_updates(max(1, TELEGRAM_CONCURRENT_UPDATES))
+        .connection_pool_size(max(16, TELEGRAM_CONNECTION_POOL_SIZE))
+        .pool_timeout(max(1.0, TELEGRAM_POOL_TIMEOUT_SECONDS))
+        .get_updates_connection_pool_size(4)
+        .build()
+    )
 
     app.add_handler(MessageHandler(filters.ALL, maintenance_guard), group=-1)
     app.add_handler(CallbackQueryHandler(maintenance_guard), group=-1)
