@@ -32,6 +32,7 @@ import random
 import re
 import secrets
 import sqlite3
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -142,6 +143,7 @@ MONGO_UPLOAD_RETRY_ATTEMPTS = int(os.getenv("MONGO_UPLOAD_RETRY_ATTEMPTS", "2"))
 MONGO_UPLOAD_RETRY_DELAY_SECONDS = float(os.getenv("MONGO_UPLOAD_RETRY_DELAY_SECONDS", "2"))
 # When MongoDB is enabled, this is only a local runtime cache restored from/synced to MongoDB.
 DB_PATH = os.getenv("DB_PATH", "/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db").strip() or ("/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db")
+REQUIRE_PERSISTENT_SQLITE = os.getenv("REQUIRE_PERSISTENT_SQLITE", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 # Local default: polling. Railway can also run polling. If you want a webhook, set MODE=webhook + WEBHOOK_URL.
 MODE = os.getenv("MODE", "polling").strip().lower()
@@ -337,6 +339,21 @@ def _mongo_available_or_raise() -> None:
         raise BotConfigError("STORAGE_BACKEND=mongodb requires MONGO_URI or MONGODB_URI.")
     if MongoClient is None or gridfs is None:
         raise BotConfigError("MongoDB storage requires pymongo. Run: pip install -r requirements.txt")
+
+
+def validate_storage_durability() -> None:
+    if _mongo_configured() or not REQUIRE_PERSISTENT_SQLITE:
+        return
+    db_path = os.path.abspath(DB_PATH)
+    temp_roots = {
+        os.path.abspath("/tmp"),
+        os.path.abspath(tempfile.gettempdir()),
+    }
+    if any(db_path == root or db_path.startswith(root + os.sep) for root in temp_roots):
+        raise BotConfigError(
+            "Persistent SQLite is required, but DB_PATH points to temporary storage. "
+            "Attach a Railway Volume and set DB_PATH to its mount path, for example /data/upi_autopay_bot.db."
+        )
 
 
 def _is_mongo_quota_error(exc: BaseException) -> bool:
@@ -18687,6 +18704,7 @@ async def telegram_webhook(request: Request):
 @web_app.on_event("startup")
 async def web_startup() -> None:
     global telegram_application, polling_started, marketplace_background_task, payment_background_task, _mongo_sync_suspended
+    validate_storage_durability()
     _mongo_available_or_raise()
     restore_mongo_snapshot_if_configured()
     _mongo_sync_suspended = True

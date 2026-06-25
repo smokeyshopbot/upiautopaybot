@@ -229,6 +229,22 @@ How it works:
 - MongoDB is the persistent live store.
 - The bot restores a temporary local runtime database from MongoDB on startup.
 - After commits, the bot syncs the latest database snapshot back to MongoDB.
+
+## Recommended Railway production storage
+
+For this SQL-heavy bot, the safest production layout is SQLite on a Railway Volume:
+
+1. Attach one Railway Volume to the bot service at `/data`.
+2. Run `python scripts/migrate_mongo_snapshot_to_volume.py` once while `MONGO_URI` is still configured.
+3. Then set:
+
+```env
+STORAGE_BACKEND=sqlite
+DB_PATH=/data/upi_autopay_bot.db
+REQUIRE_PERSISTENT_SQLITE=true
+```
+
+Keep one service replica because Railway Volumes cannot be shared by replicas. Enable Railway Volume backups. The migration tool reads MongoDB without modifying it, integrity-checks the SQLite snapshot, and atomically writes it to the mounted volume.
 - This keeps all existing bot/admin behavior intact while removing the need for local persistent storage.
 
 For local-only testing without MongoDB, use:
