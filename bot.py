@@ -35,7 +35,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
@@ -188,7 +188,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 QR_EXPIRE_MINUTES = int(os.getenv("QR_EXPIRE_MINUTES", "5"))
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(QR_EXPIRE_MINUTES)))
 SENDER_CANCEL_WAIT_SECONDS = int(os.getenv("SENDER_CANCEL_WAIT_SECONDS", "120"))
-MARKETPLACE_WATCH_INTERVAL_SECONDS = int(os.getenv("MARKETPLACE_WATCH_INTERVAL_SECONDS", "10"))
+MARKETPLACE_WATCH_INTERVAL_SECONDS = int(os.getenv("MARKETPLACE_WATCH_INTERVAL_SECONDS", "5"))
 PAYMENT_WATCH_INTERVAL_SECONDS = int(os.getenv("PAYMENT_WATCH_INTERVAL_SECONDS", "30"))
 PAYMENT_TIMEOUT_MINUTES = int(os.getenv("PAYMENT_TIMEOUT_MINUTES", "30"))
 PAYMENT_REMINDER_MINUTES = int(os.getenv("PAYMENT_REMINDER_MINUTES", "20"))
@@ -196,6 +196,10 @@ ACTIVE_PAYMENT_CHECK_STATUSES = ("waiting", "manual_pending")
 PAYMENT_WATCH_BATCH_SIZE = int(os.getenv("PAYMENT_WATCH_BATCH_SIZE", "25"))
 PAYMENT_WATCH_CONCURRENCY = int(os.getenv("PAYMENT_WATCH_CONCURRENCY", "5"))
 PAYMENT_AUTO_VERIFY_TIMEOUT_SECONDS = int(os.getenv("PAYMENT_AUTO_VERIFY_TIMEOUT_SECONDS", "60"))
+PAYMENT_VERIFICATION_LOG_RETENTION_DAYS = int(os.getenv("PAYMENT_VERIFICATION_LOG_RETENTION_DAYS", "14"))
+PAYMENT_VERIFICATION_LOG_MAX_ROWS = int(os.getenv("PAYMENT_VERIFICATION_LOG_MAX_ROWS", "20000"))
+PAYMENT_VERIFICATION_LOG_DEDUPE_MINUTES = int(os.getenv("PAYMENT_VERIFICATION_LOG_DEDUPE_MINUTES", "60"))
+DB_STARTUP_VACUUM_MIN_MB = int(os.getenv("DB_STARTUP_VACUUM_MIN_MB", "64"))
 EVM_LOG_LOOKBACK_BLOCKS = int(os.getenv("EVM_LOG_LOOKBACK_BLOCKS", "50000"))
 BEP20_RPC_URL = os.getenv("BEP20_RPC_URL", "https://bsc-rpc.publicnode.com").strip()
 POLYGON_RPC_URL = os.getenv("POLYGON_RPC_URL", "https://polygon-rpc.com").strip()
@@ -226,8 +230,8 @@ DEFAULT_QR_METHOD_ENABLED = os.getenv("QR_METHOD_ENABLED", "true").strip().lower
 DEFAULT_ACCESS_TOKEN_METHOD_ENABLED = os.getenv("ACCESS_TOKEN_METHOD_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 ACCESS_TOKEN_KEY_LOW_THRESHOLD = int(os.getenv("ACCESS_TOKEN_KEY_LOW_THRESHOLD", "10"))
 ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS = int(os.getenv("ACCESS_TOKEN_KEY_NOTIFY_COOLDOWN_SECONDS", "3600"))
-OFFER_TIMER_REFRESH_ENABLED = os.getenv("OFFER_TIMER_REFRESH_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
-OFFER_TIMER_REFRESH_SECONDS = int(os.getenv("OFFER_TIMER_REFRESH_SECONDS", "30"))
+OFFER_TIMER_REFRESH_ENABLED = os.getenv("OFFER_TIMER_REFRESH_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+OFFER_TIMER_REFRESH_SECONDS = int(os.getenv("OFFER_TIMER_REFRESH_SECONDS", "5"))
 DEFAULT_MIN_PAYOUT_USDT = os.getenv("DEFAULT_MIN_PAYOUT_USDT", "1").strip() or "1"
 DEFAULT_MIN_WALLET_TOPUP_USDT = os.getenv("DEFAULT_MIN_WALLET_TOPUP_USDT", "1").strip() or "1"
 DEFAULT_BEP20_MANUAL_TOLERANCE_USDT = os.getenv("BEP20_MANUAL_TOLERANCE_USDT", "0.01").strip() or "0.01"
@@ -304,6 +308,7 @@ _mongo_sync_in_progress = False
 _mongo_sync_task: asyncio.Task | None = None
 _mongo_sync_pending = False
 _mongo_sync_force_pending = False
+_mongo_sync_suspended = False
 _admin_poll_tables_ready = False
 
 
@@ -454,6 +459,24 @@ def sync_db_to_mongo(force: bool = False) -> None:
                     fs.delete(old_file_id)
                 except Exception:
                     logger.debug("Could not delete previous MongoDB SQLite snapshot", exc_info=True)
+            # Remove stale/orphaned generations for this snapshot ID as well. A
+            # crash between GridFS upload and bot_state update can otherwise leave
+            # hundreds of megabytes permanently stranded in .files/.chunks.
+            try:
+                stale_files = _mongo_db["sqlite_snapshots.files"].find(
+                    {
+                        "_id": {"$ne": file_id},
+                        "$or": [
+                            {"metadata.snapshot_id": MONGO_SNAPSHOT_ID},
+                            {"filename": f"{MONGO_SNAPSHOT_ID}.sqlite3"},
+                        ],
+                    },
+                    {"_id": 1},
+                )
+                for stale in stale_files:
+                    fs.delete(stale["_id"])
+            except Exception:
+                logger.debug("Could not delete orphaned MongoDB SQLite snapshots", exc_info=True)
             _mongo_last_synced_fingerprint = fingerprint
             duration = time.monotonic() - started
             if duration >= 1.0:
@@ -487,6 +510,8 @@ async def _mongo_sync_worker() -> None:
 def request_mongo_sync(force: bool = False) -> None:
     """Request a MongoDB snapshot upload without blocking the current handler."""
     global _mongo_sync_task, _mongo_sync_pending, _mongo_sync_force_pending
+    if _mongo_sync_suspended:
+        return
     if not _mongo_configured() or (not MONGO_SYNC_ON_COMMIT and not force):
         return
     try:
@@ -990,6 +1015,7 @@ _ADDITIONAL_USER_TRANSLATIONS: dict[str, dict[str, str]] = {
         "insufficient_wallet": "Insufficient wallet balance. Required per scan: ${required} USDT.\nAvailable: ${available} USDT.\n\nUse /wallet and /loadwallet to add balance.",
         "photo_rejected_clear_qr": "Photo rejected: {error}\n\nSend a clear photo containing exactly one readable QR code. Captions/text are ignored.",
         "photo_rejected_process": "Photo rejected: I could not process that QR image.",
+        "qr_already_used": "This QR code has already been used and was marked {status}. Please send a new UPI mandate QR code.",
         "clean_qr_send_failed": "I generated the clean QR, but could not save/send it back to you. Please try again.",
         "send_photo_not_document": "Please send the QR as a Telegram photo, not as a document. Photos are faster to process.",
         "auto_off_limit_zero": "🔴 Your scan limit reached zero, so you were set offline automatically. Use /on LIMIT to go online again.",
@@ -2156,6 +2182,9 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         logger.exception("Could not backfill payment TxHash registry")
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_offer_state ON photos(offer_state, offer_expires_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_qr_terminal_lookup ON photos(qr_sha256, payload_type, status, status_by)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_created ON payment_verification_logs(created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_ref_created ON payment_verification_logs(ref_id, created_at)")
 
     # Chat ID 0 is never messaged. It is a database placeholder for open/unclaimed
     # offers in older schemas where photos.receiver_chat_id is NOT NULL.
@@ -2487,6 +2516,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_photos_date ON photos(date);
             CREATE INDEX IF NOT EXISTS idx_photos_receiver_status ON photos(receiver_chat_id, status);
             CREATE INDEX IF NOT EXISTS idx_photos_sender_status ON photos(sender_chat_id, status);
+            CREATE INDEX IF NOT EXISTS idx_photos_qr_terminal_lookup ON photos(qr_sha256, payload_type, status, status_by);
             CREATE INDEX IF NOT EXISTS idx_pairs_receiver ON pairs(receiver_chat_id);
             CREATE INDEX IF NOT EXISTS idx_telegram_profiles_username ON telegram_profiles(username);
             CREATE INDEX IF NOT EXISTS idx_message_templates_active ON message_templates(active, audience);
@@ -2495,6 +2525,8 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_receiver_presence_online ON receiver_presence(online, limit_remaining);
             CREATE INDEX IF NOT EXISTS idx_payment_deposits_status ON payment_deposits(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_payment_deposits_chat ON payment_deposits(chat_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_created ON payment_verification_logs(created_at);
+            CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_ref_created ON payment_verification_logs(ref_id, created_at);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_tx_hashes_hash_unique ON payment_tx_hashes(tx_hash);
             CREATE INDEX IF NOT EXISTS idx_payment_tx_hashes_ref ON payment_tx_hashes(first_ref_id);
             CREATE INDEX IF NOT EXISTS idx_payment_tx_hashes_chat ON payment_tx_hashes(first_chat_id);
@@ -3074,6 +3106,33 @@ def sender_lifetime_balance_used(chat_id: int) -> Decimal:
 def get_photo_record(public_id: str) -> sqlite3.Row | None:
     with get_conn() as conn:
         return conn.execute("SELECT * FROM photos WHERE public_id = ?", (public_id,)).fetchone()
+
+
+def find_used_qr_by_hash(qr_sha256: str) -> sqlite3.Row | None:
+    """Find a prior terminal order for the same decoded QR payload.
+
+    Only a Done or Failed decision made by the assigned receiver blocks reuse.
+    Automatic expiry, undelivered offers, and sender cancellation remain retryable.
+    """
+    qr_sha256 = str(qr_sha256 or "").strip().lower()
+    if not qr_sha256:
+        return None
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT public_id, status, status_at
+            FROM photos
+            WHERE qr_sha256 = ?
+              AND payload_type = 'qr'
+              AND status IN ('done', 'failed')
+              AND receiver_chat_id IS NOT NULL
+              AND receiver_chat_id != 0
+              AND status_by = receiver_chat_id
+            ORDER BY COALESCE(status_at, created_at) DESC
+            LIMIT 1
+            """,
+            (qr_sha256,),
+        ).fetchone()
 
 
 def qr_detail_url(public_id: str) -> str:
@@ -4689,6 +4748,21 @@ def list_claimed_orders_for_timer_refresh(limit: int = 100) -> list[sqlite3.Row]
         ).fetchall()
 
 
+def list_open_orders_for_timer_refresh(limit: int = 100) -> list[sqlite3.Row]:
+    fetch_limit = max(1, int(limit or 100))
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT * FROM photos
+            WHERE status = 'pending'
+              AND offer_state = 'open'
+              AND offer_expires_at IS NOT NULL
+            ORDER BY offer_expires_at ASC LIMIT ?
+            """,
+            (fetch_limit,),
+        ).fetchall()
+
+
 def mark_receiver_expiry_warning_sent(public_id: str) -> bool:
     with get_conn() as conn:
         cur = conn.execute(
@@ -5594,14 +5668,94 @@ def reserve_tx_hash(
 
 
 def log_payment_check(ref_id: str | None, chat_id: int | None, method: str | None, result: str, reason: str = "", tx_hash: str | None = None, raw: dict | None = None) -> None:
+    clean_reason = str(reason or "")[:500]
+    cutoff = (now_dt() - timedelta(minutes=max(1, PAYMENT_VERIFICATION_LOG_DEDUPE_MINUTES))).isoformat(timespec="seconds")
     with get_conn() as conn:
+        duplicate = conn.execute(
+            """
+            SELECT id
+            FROM payment_verification_logs
+            WHERE COALESCE(ref_id, '') = COALESCE(?, '')
+              AND COALESCE(method, '') = COALESCE(?, '')
+              AND result = ?
+              AND reason = ?
+              AND COALESCE(tx_hash, '') = COALESCE(?, '')
+              AND created_at >= ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (ref_id, method, result, clean_reason, tx_hash, cutoff),
+        ).fetchone()
+        if duplicate:
+            return
         conn.execute(
             """
             INSERT INTO payment_verification_logs(ref_id, chat_id, method, result, reason, tx_hash, raw_json, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (ref_id, chat_id, method, result, reason[:500], tx_hash, json.dumps(raw or {}, default=str)[:5000], now_iso()),
+            (ref_id, chat_id, method, result, clean_reason, tx_hash, json.dumps(raw or {}, default=str)[:5000], now_iso()),
         )
+
+
+def maintain_payment_verification_logs(*, compact: bool = False) -> dict[str, int | bool]:
+    """Bound payment-check history and optionally reclaim SQLite file space."""
+    retention_days = max(1, PAYMENT_VERIFICATION_LOG_RETENTION_DAYS)
+    max_rows = max(1000, PAYMENT_VERIFICATION_LOG_MAX_ROWS)
+    cutoff = (now_dt() - timedelta(days=retention_days)).isoformat(timespec="seconds")
+    deleted = 0
+
+    with get_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute("DELETE FROM payment_verification_logs WHERE created_at < ?", (cutoff,))
+        deleted += max(0, int(cur.rowcount or 0))
+        count_row = conn.execute("SELECT COUNT(*) FROM payment_verification_logs").fetchone()
+        remaining = int(count_row[0] if count_row else 0)
+        if remaining > max_rows:
+            boundary = conn.execute(
+                "SELECT id FROM payment_verification_logs ORDER BY id DESC LIMIT 1 OFFSET ?",
+                (max_rows - 1,),
+            ).fetchone()
+            if boundary:
+                cur = conn.execute("DELETE FROM payment_verification_logs WHERE id < ?", (int(boundary[0]),))
+                deleted += max(0, int(cur.rowcount or 0))
+        remaining_row = conn.execute("SELECT COUNT(*) FROM payment_verification_logs").fetchone()
+        remaining = int(remaining_row[0] if remaining_row else 0)
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0] or 4096)
+        page_count = int(conn.execute("PRAGMA page_count").fetchone()[0] or 0)
+        freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0] or 0)
+        conn.commit()
+
+    size_before = page_size * page_count
+    vacuumed = False
+    min_bytes = max(1, DB_STARTUP_VACUUM_MIN_MB) * 1024 * 1024
+    should_vacuum = compact and size_before >= min_bytes and (deleted > 0 or freelist_count > max(1000, page_count // 10))
+    if should_vacuum:
+        try:
+            with get_conn() as conn:
+                conn.execute("VACUUM")
+            vacuumed = True
+        except Exception:
+            logger.exception("Could not VACUUM SQLite after payment-log cleanup")
+
+    try:
+        size_after = os.path.getsize(os.path.abspath(DB_PATH))
+    except OSError:
+        size_after = size_before
+    logger.info(
+        "Payment verification log maintenance: deleted=%s remaining=%s vacuumed=%s db_before=%s db_after=%s",
+        deleted,
+        remaining,
+        vacuumed,
+        size_before,
+        size_after,
+    )
+    return {
+        "deleted": deleted,
+        "remaining": remaining,
+        "vacuumed": vacuumed,
+        "size_before": size_before,
+        "size_after": size_after,
+    }
 
 
 def _http_get_json(url: str, headers: dict[str, str] | None = None, timeout: int = 8) -> dict:
@@ -10387,6 +10541,8 @@ async def poll_single_deposit_payment(application: Application, ref_id: str) -> 
             return
         if status == "manual_pending" and not str(dep["tx_hash"] or "").strip():
             return
+        if status == "manual_pending" and dep["expires_at"] and str(dep["expires_at"]) <= now_iso():
+            return
         settings = get_marketplace_settings()
         interval_seconds = max(5, int(settings.get("payment_watch_interval_seconds") or PAYMENT_WATCH_INTERVAL_SECONDS))
         reminder_minutes = max(0, int(settings.get("payment_reminder_minutes") or PAYMENT_REMINDER_MINUTES))
@@ -10408,6 +10564,8 @@ async def poll_single_deposit_payment(application: Application, ref_id: str) -> 
             return
         status = str(dep["status"] or "")
         if status not in ACTIVE_PAYMENT_CHECK_STATUSES:
+            return
+        if status == "manual_pending" and dep["expires_at"] and str(dep["expires_at"]) <= now_iso():
             return
         await _process_one_payment_auto_check(application, dep, reminder_minutes)
 
@@ -11708,84 +11866,93 @@ def schedule_qr_expiry_task(application: Application | None, public_id: str, exp
         logger.exception("Could not schedule QR expiry task for %s", public_id)
 
 
+async def refresh_open_offer_timer_once(bot, public_id: str, row: sqlite3.Row | None = None) -> bool:
+    row = row or get_photo_record(public_id)
+    if not row:
+        return False
+    if str(row["status"] or "").lower() != "pending" or str(row["offer_state"] or "").lower() != "open":
+        return False
+    if iso_is_due(row["offer_expires_at"]):
+        return False
+
+    payload_type = order_payload_type(row)
+    text_args = (
+        public_id,
+        int(row["daily_no"]),
+        effective_sender_charge_amount(row, use_current_setting_if_missing=True),
+        _dec(row["receiver_rate_usdt"]),
+        str(row["offer_expires_at"] or ""),
+    )
+    sender_chat_id = int(row["sender_chat_id"] or 0)
+    sender_message_id = int(row["sender_message_id"] or 0)
+    if sender_chat_id > 0 and sender_message_id > 0:
+        if payload_type == "access_token":
+            sender_text = build_sender_access_token_offer_message(
+                str(row["date"]),
+                int(row["daily_no"]),
+                public_id,
+                tr_chat(sender_chat_id, "sender_offer_sent"),
+                str(row["payload_text"] or "").strip(),
+                expires_at=str(row["offer_expires_at"] or ""),
+                sender_rate=effective_sender_charge_amount(row, use_current_setting_if_missing=True),
+                order_row=row,
+                chat_id=sender_chat_id,
+            )
+            await edit_sender_access_token_order_message(
+                bot,
+                sender_chat_id,
+                sender_message_id,
+                sender_text,
+                reply_markup=sender_access_token_open_offer_keyboard(public_id, str(row["payload_text"] or "").strip(), sender_chat_id),
+            )
+        else:
+            sender_text = build_sender_offer_caption(
+                str(row["date"]),
+                int(row["daily_no"]),
+                public_id,
+                tr_chat(sender_chat_id, "sender_offer_sent"),
+                expires_at=str(row["offer_expires_at"] or ""),
+                sender_rate=effective_sender_charge_amount(row, use_current_setting_if_missing=True),
+                order_row=row,
+                chat_id=sender_chat_id,
+            )
+            await edit_sender_offer_caption(
+                bot,
+                sender_chat_id,
+                sender_message_id,
+                sender_text,
+                reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
+            )
+
+    for note in offer_notifications(public_id):
+        if str(note["state"] or "").lower() != "sent":
+            continue
+        receiver_chat_id = int(note["receiver_chat_id"])
+        try:
+            current = get_photo_record(public_id)
+            if not current or str(current["status"] or "").lower() != "pending" or str(current["offer_state"] or "").lower() != "open":
+                return False
+            await bot.edit_message_text(
+                chat_id=receiver_chat_id,
+                message_id=int(note["message_id"]),
+                text=build_offer_text(*text_args, chat_id=receiver_chat_id, payload_type=payload_type),
+                reply_markup=build_offer_keyboard(public_id, receiver_chat_id, payload_type),
+            )
+            await asyncio.sleep(0.02)
+        except TelegramError as exc:
+            if "message is not modified" not in str(exc).lower():
+                logger.debug("Could not refresh offer timer %s for %s: %s", public_id, receiver_chat_id, exc)
+    return True
+
+
 async def refresh_open_offer_timer_after_delay(application: Application, public_id: str) -> None:
     interval = max(1, OFFER_TIMER_REFRESH_SECONDS)
     try:
         while True:
             await asyncio.sleep(interval)
-            row = get_photo_record(public_id)
-            if not row:
+            keep_refreshing = await refresh_open_offer_timer_once(application.bot, public_id)
+            if not keep_refreshing:
                 return
-            if str(row["status"] or "").lower() != "pending" or str(row["offer_state"] or "").lower() != "open":
-                return
-            if iso_is_due(row["offer_expires_at"]):
-                return
-            payload_type = order_payload_type(row)
-            text_args = (
-                public_id,
-                int(row["daily_no"]),
-                effective_sender_charge_amount(row, use_current_setting_if_missing=True),
-                _dec(row["receiver_rate_usdt"]),
-                str(row["offer_expires_at"] or ""),
-            )
-            sender_chat_id = int(row["sender_chat_id"] or 0)
-            sender_message_id = int(row["sender_message_id"] or 0)
-            if sender_chat_id > 0 and sender_message_id > 0:
-                if payload_type == "access_token":
-                    sender_text = build_sender_access_token_offer_message(
-                        str(row["date"]),
-                        int(row["daily_no"]),
-                        public_id,
-                        tr_chat(sender_chat_id, "sender_offer_sent"),
-                        str(row["payload_text"] or "").strip(),
-                        expires_at=str(row["offer_expires_at"] or ""),
-                        sender_rate=effective_sender_charge_amount(row, use_current_setting_if_missing=True),
-                        order_row=row,
-                        chat_id=sender_chat_id,
-                    )
-                    await edit_sender_access_token_order_message(
-                        application.bot,
-                        sender_chat_id,
-                        sender_message_id,
-                        sender_text,
-                        reply_markup=sender_access_token_open_offer_keyboard(public_id, str(row["payload_text"] or "").strip(), sender_chat_id),
-                    )
-                else:
-                    sender_text = build_sender_offer_caption(
-                        str(row["date"]),
-                        int(row["daily_no"]),
-                        public_id,
-                        tr_chat(sender_chat_id, "sender_offer_sent"),
-                        expires_at=str(row["offer_expires_at"] or ""),
-                        sender_rate=effective_sender_charge_amount(row, use_current_setting_if_missing=True),
-                        order_row=row,
-                        chat_id=sender_chat_id,
-                    )
-                    await edit_sender_offer_caption(
-                        application.bot,
-                        sender_chat_id,
-                        sender_message_id,
-                        sender_text,
-                        reply_markup=sender_open_offer_keyboard(public_id, sender_chat_id),
-                    )
-            for note in offer_notifications(public_id):
-                if str(note["state"] or "").lower() != "sent":
-                    continue
-                receiver_chat_id = int(note["receiver_chat_id"])
-                try:
-                    current = get_photo_record(public_id)
-                    if not current or str(current["status"] or "").lower() != "pending" or str(current["offer_state"] or "").lower() != "open":
-                        return
-                    await application.bot.edit_message_text(
-                        chat_id=receiver_chat_id,
-                        message_id=int(note["message_id"]),
-                        text=build_offer_text(*text_args, chat_id=receiver_chat_id, payload_type=payload_type),
-                        reply_markup=build_offer_keyboard(public_id, receiver_chat_id, payload_type),
-                    )
-                    await asyncio.sleep(0.02)
-                except TelegramError as exc:
-                    if "message is not modified" not in str(exc).lower():
-                        logger.debug("Could not refresh offer timer %s for %s: %s", public_id, receiver_chat_id, exc)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -12155,19 +12322,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(tr_chat(chat.id, "maintenance_paused"))
         return
 
-    receivers = online_receivers()
-    if not receivers:
-        await update.message.reply_text(tr_chat(chat.id, "no_receiver_online"))
-        return
-
-    sender_rate = _dec(settings["sender_rate_usdt"])
-    receiver_rate = _dec(settings["receiver_rate_usdt"])
-    if sender_rate > 0 and available_sender_balance(chat.id) < sender_rate:
-        await update.message.reply_text(
-            tr_chat(chat.id, "insufficient_wallet", required=_money(sender_rate), available=_money(available_sender_balance(chat.id)))
-        )
-        return
-
     started_at = time.perf_counter()
     try:
         clean_qr_file, qr_data, qr_hash = await extract_and_rebuild_clean_qr(update.message)
@@ -12181,6 +12335,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.exception("Unexpected QR processing error")
         await update.message.reply_text(tr_chat(chat.id, "photo_rejected_process"))
         await delete_original_sender_message_safely(context, chat.id, update.message.message_id, rejected=True)
+        return
+
+    used_qr = find_used_qr_by_hash(qr_hash)
+    if used_qr is not None:
+        await update.message.reply_text(
+            tr_chat(chat.id, "qr_already_used", status=str(used_qr["status"]).upper())
+        )
+        await delete_original_sender_message_safely(context, chat.id, update.message.message_id, rejected=True)
+        return
+
+    receivers = online_receivers()
+    if not receivers:
+        await update.message.reply_text(tr_chat(chat.id, "no_receiver_online"))
+        return
+
+    sender_rate = _dec(settings["sender_rate_usdt"])
+    receiver_rate = _dec(settings["receiver_rate_usdt"])
+    if sender_rate > 0 and available_sender_balance(chat.id) < sender_rate:
+        await update.message.reply_text(
+            tr_chat(chat.id, "insufficient_wallet", required=_money(sender_rate), available=_money(available_sender_balance(chat.id)))
+        )
         return
 
     date_str = today_str()
@@ -13289,6 +13464,8 @@ async def marketplace_watcher(application: Application) -> None:
     while True:
         try:
             if OFFER_TIMER_REFRESH_ENABLED:
+                for row in list_open_orders_for_timer_refresh(limit=100):
+                    await refresh_open_offer_timer_once(application.bot, str(row["public_id"]), row)
                 for row in list_claimed_orders_for_timer_refresh(limit=100):
                     await refresh_claimed_order_timer_once(application.bot, str(row["public_id"]), row)
             for row in list_claimed_qrs_needing_expiry_warning(limit=100):
@@ -13322,7 +13499,11 @@ def list_deposits_for_auto_payment_check(limit: int = 25) -> list[sqlite3.Row]:
             WHERE credited_at IS NULL
               AND (
                     status = 'waiting'
-                    OR (status = 'manual_pending' AND COALESCE(NULLIF(tx_hash, ''), '') != '')
+                    OR (
+                        status = 'manual_pending'
+                        AND COALESCE(NULLIF(tx_hash, ''), '') != ''
+                        AND (expires_at IS NULL OR expires_at > ?)
+                    )
                   )
             ORDER BY
               CASE WHEN COALESCE(NULLIF(tx_hash, ''), '') != '' THEN 0 ELSE 1 END,
@@ -13330,7 +13511,7 @@ def list_deposits_for_auto_payment_check(limit: int = 25) -> list[sqlite3.Row]:
               created_at DESC
             LIMIT ?
             """,
-            (now, limit),
+            (now, now, limit),
         ).fetchall()
 
 
@@ -13452,8 +13633,12 @@ async def payment_watcher(application: Application) -> None:
     - expiration happens only after a final auto-check attempt.
     """
     logger.info("Payment watcher started")
+    next_log_maintenance_at = 0.0
     while True:
         try:
+            if time.monotonic() >= next_log_maintenance_at:
+                await asyncio.to_thread(maintain_payment_verification_logs, compact=False)
+                next_log_maintenance_at = time.monotonic() + 6 * 60 * 60
             settings = get_marketplace_settings()
             interval_seconds = max(10, int(settings.get("payment_watch_interval_seconds") or PAYMENT_WATCH_INTERVAL_SECONDS))
             reminder_minutes = max(0, int(settings.get("payment_reminder_minutes") or PAYMENT_REMINDER_MINUTES))
@@ -13646,6 +13831,22 @@ async def create_api_qr_offer(sender_chat_id: int, image_bytes: bytes) -> dict:
     if settings["maintenance_mode"]:
         raise ApiFlowError(503, "Maintenance mode is enabled. New QR submissions are paused.")
 
+    started_at = time.perf_counter()
+    try:
+        clean_qr_file, qr_data, qr_hash = await asyncio.to_thread(decode_and_rebuild_sync, image_bytes)
+    except ValueError as exc:
+        raise ApiFlowError(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected API QR processing error")
+        raise ApiFlowError(422, "Could not process the QR image.") from exc
+
+    used_qr = find_used_qr_by_hash(qr_hash)
+    if used_qr is not None:
+        raise ApiFlowError(
+            409,
+            f"This QR code has already been used and was marked {str(used_qr['status']).upper()}. Please submit a new UPI mandate QR code.",
+        )
+
     receivers = online_receivers()
     if not receivers:
         raise ApiFlowError(409, "No receiver is online right now.")
@@ -13657,15 +13858,6 @@ async def create_api_qr_offer(sender_chat_id: int, image_bytes: bytes) -> dict:
             402,
             f"Insufficient wallet balance. Required ${_money(sender_rate)} USDT, available ${_money(available_sender_balance(sender_chat_id))} USDT.",
         )
-
-    started_at = time.perf_counter()
-    try:
-        clean_qr_file, qr_data, qr_hash = await asyncio.to_thread(decode_and_rebuild_sync, image_bytes)
-    except ValueError as exc:
-        raise ApiFlowError(422, str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Unexpected API QR processing error")
-        raise ApiFlowError(422, "Could not process the QR image.") from exc
 
     date_str = today_str()
     daily_no = reserve_daily_number(date_str)
@@ -18252,10 +18444,15 @@ async def telegram_webhook(request: Request):
 
 @web_app.on_event("startup")
 async def web_startup() -> None:
-    global telegram_application, polling_started, marketplace_background_task, payment_background_task
+    global telegram_application, polling_started, marketplace_background_task, payment_background_task, _mongo_sync_suspended
     _mongo_available_or_raise()
     restore_mongo_snapshot_if_configured()
-    init_db()
+    _mongo_sync_suspended = True
+    try:
+        init_db()
+        maintain_payment_verification_logs(compact=True)
+    finally:
+        _mongo_sync_suspended = False
     validate_config()
     sync_db_to_mongo(force=True)
     telegram_application = build_application()
