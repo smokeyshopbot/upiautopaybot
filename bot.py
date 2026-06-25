@@ -64,11 +64,14 @@ except ImportError:  # optional; requirements.txt includes it, but keep local up
 
 try:
     from pymongo import MongoClient
-    from pymongo.errors import PyMongoError
+    from pymongo.errors import OperationFailure, PyMongoError
+    from bson import ObjectId
     import gridfs
 except ImportError:  # MongoDB is optional unless STORAGE_BACKEND=mongodb or MONGO_URI is set
     MongoClient = None
     PyMongoError = Exception
+    OperationFailure = Exception
+    ObjectId = None
     gridfs = None
 
 from telegram.ext import (
@@ -128,6 +131,7 @@ MONGO_SNAPSHOT_ID = os.getenv("MONGO_SNAPSHOT_ID", "upi_autopay_main").strip() o
 MONGO_SYNC_ON_COMMIT = os.getenv("MONGO_SYNC_ON_COMMIT", "true").strip().lower() in {"1", "true", "yes", "on"}
 MONGO_SYNC_DEBOUNCE_SECONDS = float(os.getenv("MONGO_SYNC_DEBOUNCE_SECONDS", "2"))
 MONGO_TLS_ALLOW_INVALID_CERTIFICATES = os.getenv("MONGO_TLS_ALLOW_INVALID_CERTIFICATES", "false").strip().lower() in {"1", "true", "yes", "on"}
+MONGO_QUOTA_RECOVERY_ENABLED = os.getenv("MONGO_QUOTA_RECOVERY_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 # When MongoDB is enabled, this is only a local runtime cache restored from/synced to MongoDB.
 DB_PATH = os.getenv("DB_PATH", "/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db").strip() or ("/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db")
 
@@ -325,6 +329,12 @@ def _mongo_available_or_raise() -> None:
         raise BotConfigError("MongoDB storage requires pymongo. Run: pip install -r requirements.txt")
 
 
+def _is_mongo_quota_error(exc: BaseException) -> bool:
+    text = str(exc or "").lower()
+    code = getattr(exc, "code", None)
+    return code == 8000 or "space quota" in text or "over your space quota" in text
+
+
 def _mongo_objects():
     """Return Mongo client/db/GridFS/state collection, creating them lazily."""
     global _mongo_client, _mongo_db, _mongo_fs, _mongo_state_col
@@ -352,7 +362,17 @@ def _mongo_objects():
         _mongo_db = default_db if default_db is not None else _mongo_client[MONGO_DB_NAME]
         _mongo_fs = gridfs.GridFS(_mongo_db, collection="sqlite_snapshots")
         _mongo_state_col = _mongo_db[MONGO_STATE_COLLECTION]
-        _mongo_state_col.create_index("updated_at")
+        # bot_state normally contains one document, so this index is optional.
+        # Never make startup depend on an index write: Atlas blocks writes when a
+        # free-tier cluster exceeds quota, but reads/deletes are still needed to
+        # download and compact the oversized snapshot.
+        try:
+            _mongo_state_col.create_index("updated_at")
+        except OperationFailure as exc:
+            if _is_mongo_quota_error(exc):
+                logger.warning("MongoDB is over storage quota; skipping optional bot_state index creation for recovery.")
+            else:
+                raise
         logger.info("MongoDB storage connected: database=%s state_collection=%s", _mongo_db.name, MONGO_STATE_COLLECTION)
     return _mongo_client, _mongo_db, _mongo_fs, _mongo_state_col
 
@@ -379,8 +399,22 @@ def restore_mongo_snapshot_if_configured() -> None:
         state = state_col.find_one({"_id": MONGO_SNAPSHOT_ID})
         file_id = state.get("file_id") if state else None
         if not file_id:
-            logger.info("No MongoDB database snapshot found yet; a new one will be created after init.")
-            return
+            # Recover from an interrupted state-document update by selecting the
+            # newest complete GridFS generation for this configured snapshot.
+            fallback = _mongo_db["sqlite_snapshots.files"].find_one(
+                {
+                    "$or": [
+                        {"metadata.snapshot_id": MONGO_SNAPSHOT_ID},
+                        {"filename": f"{MONGO_SNAPSHOT_ID}.sqlite3"},
+                    ]
+                },
+                sort=[("uploadDate", -1)],
+            )
+            file_id = fallback.get("_id") if fallback else None
+            if not file_id:
+                logger.info("No MongoDB database snapshot found yet; a new one will be created after init.")
+                return
+            logger.warning("Recovered MongoDB snapshot from GridFS because bot_state had no file reference.")
         data = fs.get(file_id).read()
         tmp_path = f"{db_path}.mongo_restore_tmp"
         with open(tmp_path, "wb") as f:
@@ -396,10 +430,113 @@ def restore_mongo_snapshot_if_configured() -> None:
         except Exception:
             logger.debug("Could not remove old SQLite WAL/SHM files", exc_info=True)
         stat = os.stat(db_path)
+        check_conn = sqlite3.connect(db_path)
+        try:
+            quick_check = str(check_conn.execute("PRAGMA quick_check").fetchone()[0] or "")
+        finally:
+            check_conn.close()
+        if quick_check.lower() != "ok":
+            raise BotConfigError(f"Downloaded SQLite snapshot failed integrity check: {quick_check}")
         _mongo_last_synced_fingerprint = (stat.st_mtime_ns, stat.st_size)
         logger.info("Restored database snapshot from MongoDB: %s bytes", len(data))
     except Exception as exc:
         raise BotConfigError(f"Could not restore MongoDB database snapshot: {exc}") from exc
+
+
+def _new_mongo_file_id():
+    return ObjectId() if ObjectId is not None else f"{MONGO_SNAPSHOT_ID}:{secrets.token_hex(12)}"
+
+
+def _matching_snapshot_file_ids() -> list:
+    if _mongo_db is None:
+        return []
+    rows = _mongo_db["sqlite_snapshots.files"].find(
+        {
+            "$or": [
+                {"metadata.snapshot_id": MONGO_SNAPSHOT_ID},
+                {"filename": f"{MONGO_SNAPSHOT_ID}.sqlite3"},
+            ]
+        },
+        {"_id": 1},
+    )
+    return [row["_id"] for row in rows]
+
+
+def _cleanup_gridfs_file_id(fs, file_id) -> None:
+    if fs is None or file_id is None:
+        return
+    try:
+        fs.delete(file_id)
+    except Exception:
+        # A failed GridFS upload may have chunks but no files document, in
+        # which case GridFS.delete cannot discover them.
+        if _mongo_db is not None:
+            try:
+                _mongo_db["sqlite_snapshots.chunks"].delete_many({"files_id": file_id})
+                _mongo_db["sqlite_snapshots.files"].delete_one({"_id": file_id})
+            except Exception:
+                logger.debug("Could not clean partial GridFS upload %s", file_id, exc_info=True)
+
+
+def _upload_sqlite_snapshot(fs, data: bytes):
+    file_id = _new_mongo_file_id()
+    try:
+        fs.put(
+            data,
+            _id=file_id,
+            filename=f"{MONGO_SNAPSHOT_ID}.sqlite3",
+            contentType="application/vnd.sqlite3",
+            metadata={"snapshot_id": MONGO_SNAPSHOT_ID, "app": APP_NAME},
+        )
+        return file_id
+    except Exception:
+        _cleanup_gridfs_file_id(fs, file_id)
+        raise
+
+
+def _replace_snapshot_under_quota(fs, state_col, data: bytes, old_file_id):
+    """Free the old GridFS generation first, then upload its compact replacement.
+
+    This path is used only after Atlas explicitly rejects a normal copy-on-write
+    upload for exceeding its storage quota. The local SQLite file has already
+    passed PRAGMA quick_check, so it is the recovery copy while GridFS is replaced.
+    """
+    if not MONGO_QUOTA_RECOVERY_ENABLED:
+        raise RuntimeError("MongoDB is over quota and quota recovery is disabled.")
+    logger.warning(
+        "MongoDB quota recovery: replacing the oversized snapshot in-place after a local integrity check."
+    )
+    ids = set(_matching_snapshot_file_ids())
+    if old_file_id is not None:
+        ids.add(old_file_id)
+    for file_id in ids:
+        _cleanup_gridfs_file_id(fs, file_id)
+
+    # Remove chunks left by any earlier interrupted GridFS upload.
+    if _mongo_db is not None:
+        live_ids = _mongo_db["sqlite_snapshots.files"].distinct("_id")
+        _mongo_db["sqlite_snapshots.chunks"].delete_many({"files_id": {"$nin": live_ids}})
+
+    file_id = _upload_sqlite_snapshot(fs, data)
+    try:
+        state_col.update_one(
+            {"_id": MONGO_SNAPSHOT_ID},
+            {
+                "$set": {
+                    "file_id": file_id,
+                    "filename": f"{MONGO_SNAPSHOT_ID}.sqlite3",
+                    "size_bytes": len(data),
+                    "storage_backend": "mongodb-backed-sqlite",
+                    "updated_at": now_iso() if "now_iso" in globals() else datetime.utcnow().isoformat(timespec="seconds"),
+                }
+            },
+            upsert=True,
+        )
+    except Exception:
+        _cleanup_gridfs_file_id(fs, file_id)
+        raise
+    logger.warning("MongoDB quota recovery completed with compact snapshot size=%s bytes.", len(data))
+    return file_id
 
 
 def sync_db_to_mongo(force: bool = False) -> None:
@@ -435,25 +572,28 @@ def sync_db_to_mongo(force: bool = False) -> None:
                 return
             old_state = state_col.find_one({"_id": MONGO_SNAPSHOT_ID}) or {}
             old_file_id = old_state.get("file_id")
-            file_id = fs.put(
-                data,
-                filename=f"{MONGO_SNAPSHOT_ID}.sqlite3",
-                contentType="application/vnd.sqlite3",
-                metadata={"snapshot_id": MONGO_SNAPSHOT_ID, "app": APP_NAME},
-            )
-            state_col.update_one(
-                {"_id": MONGO_SNAPSHOT_ID},
-                {
-                    "$set": {
-                        "file_id": file_id,
-                        "filename": f"{MONGO_SNAPSHOT_ID}.sqlite3",
-                        "size_bytes": len(data),
-                        "storage_backend": "mongodb-backed-sqlite",
-                        "updated_at": now_iso() if "now_iso" in globals() else datetime.utcnow().isoformat(timespec="seconds"),
-                    }
-                },
-                upsert=True,
-            )
+            file_id = None
+            try:
+                file_id = _upload_sqlite_snapshot(fs, data)
+                state_col.update_one(
+                    {"_id": MONGO_SNAPSHOT_ID},
+                    {
+                        "$set": {
+                            "file_id": file_id,
+                            "filename": f"{MONGO_SNAPSHOT_ID}.sqlite3",
+                            "size_bytes": len(data),
+                            "storage_backend": "mongodb-backed-sqlite",
+                            "updated_at": now_iso() if "now_iso" in globals() else datetime.utcnow().isoformat(timespec="seconds"),
+                        }
+                    },
+                    upsert=True,
+                )
+            except OperationFailure as exc:
+                if file_id is not None:
+                    _cleanup_gridfs_file_id(fs, file_id)
+                if not _is_mongo_quota_error(exc):
+                    raise
+                file_id = _replace_snapshot_under_quota(fs, state_col, data, old_file_id)
             if old_file_id and old_file_id != file_id:
                 try:
                     fs.delete(old_file_id)
@@ -2183,8 +2323,6 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_offer_state ON photos(offer_state, offer_expires_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_photos_qr_terminal_lookup ON photos(qr_sha256, payload_type, status, status_by)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_created ON payment_verification_logs(created_at)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_ref_created ON payment_verification_logs(ref_id, created_at)")
 
     # Chat ID 0 is never messaged. It is a database placeholder for open/unclaimed
     # offers in older schemas where photos.receiver_chat_id is NOT NULL.
@@ -2525,8 +2663,6 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_receiver_presence_online ON receiver_presence(online, limit_remaining);
             CREATE INDEX IF NOT EXISTS idx_payment_deposits_status ON payment_deposits(status, created_at);
             CREATE INDEX IF NOT EXISTS idx_payment_deposits_chat ON payment_deposits(chat_id, created_at);
-            CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_created ON payment_verification_logs(created_at);
-            CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_ref_created ON payment_verification_logs(ref_id, created_at);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_tx_hashes_hash_unique ON payment_tx_hashes(tx_hash);
             CREATE INDEX IF NOT EXISTS idx_payment_tx_hashes_ref ON payment_tx_hashes(first_ref_id);
             CREATE INDEX IF NOT EXISTS idx_payment_tx_hashes_chat ON payment_tx_hashes(first_chat_id);
@@ -5718,6 +5854,11 @@ def maintain_payment_verification_logs(*, compact: bool = False) -> dict[str, in
             if boundary:
                 cur = conn.execute("DELETE FROM payment_verification_logs WHERE id < ?", (int(boundary[0]),))
                 deleted += max(0, int(cur.rowcount or 0))
+        # Build maintenance indexes only after pruning. Creating them against a
+        # previously runaway multi-million-row log table can itself exhaust
+        # startup disk/time before recovery gets a chance to run.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_created ON payment_verification_logs(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_payment_verification_logs_ref_created ON payment_verification_logs(ref_id, created_at)")
         remaining_row = conn.execute("SELECT COUNT(*) FROM payment_verification_logs").fetchone()
         remaining = int(remaining_row[0] if remaining_row else 0)
         page_size = int(conn.execute("PRAGMA page_size").fetchone()[0] or 4096)
