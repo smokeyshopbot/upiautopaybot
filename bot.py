@@ -132,6 +132,11 @@ MONGO_SYNC_ON_COMMIT = os.getenv("MONGO_SYNC_ON_COMMIT", "true").strip().lower()
 MONGO_SYNC_DEBOUNCE_SECONDS = float(os.getenv("MONGO_SYNC_DEBOUNCE_SECONDS", "2"))
 MONGO_TLS_ALLOW_INVALID_CERTIFICATES = os.getenv("MONGO_TLS_ALLOW_INVALID_CERTIFICATES", "false").strip().lower() in {"1", "true", "yes", "on"}
 MONGO_QUOTA_RECOVERY_ENABLED = os.getenv("MONGO_QUOTA_RECOVERY_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "15000"))
+MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "15000"))
+MONGO_SOCKET_TIMEOUT_MS = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000"))
+MONGO_UPLOAD_RETRY_ATTEMPTS = int(os.getenv("MONGO_UPLOAD_RETRY_ATTEMPTS", "2"))
+MONGO_UPLOAD_RETRY_DELAY_SECONDS = float(os.getenv("MONGO_UPLOAD_RETRY_DELAY_SECONDS", "2"))
 # When MongoDB is enabled, this is only a local runtime cache restored from/synced to MongoDB.
 DB_PATH = os.getenv("DB_PATH", "/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db").strip() or ("/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db")
 
@@ -307,6 +312,7 @@ _mongo_fs = None
 _mongo_state_col = None
 _mongo_sync_lock = threading.RLock()
 _mongo_restored_once = False
+_mongo_snapshot_restored = False
 _mongo_last_synced_fingerprint: tuple[int, int] | None = None
 _mongo_sync_in_progress = False
 _mongo_sync_task: asyncio.Task | None = None
@@ -344,9 +350,9 @@ def _mongo_objects():
     if _mongo_client is None:
         logger.info("Connecting MongoDB storage backend")
         kwargs = {
-            "serverSelectionTimeoutMS": 10000,
-            "connectTimeoutMS": 10000,
-            "socketTimeoutMS": 20000,
+            "serverSelectionTimeoutMS": max(1000, MONGO_SERVER_SELECTION_TIMEOUT_MS),
+            "connectTimeoutMS": max(1000, MONGO_CONNECT_TIMEOUT_MS),
+            "socketTimeoutMS": max(5000, MONGO_SOCKET_TIMEOUT_MS),
             "retryWrites": True,
         }
         if MONGO_TLS_ALLOW_INVALID_CERTIFICATES:
@@ -385,7 +391,7 @@ def restore_mongo_snapshot_if_configured() -> None:
     the SQLite file is a disposable single-process cache. This removes the need for a
     persistent disk volume on Railway/Render while preserving the tested bot behavior.
     """
-    global _mongo_restored_once, _mongo_last_synced_fingerprint
+    global _mongo_restored_once, _mongo_snapshot_restored, _mongo_last_synced_fingerprint
     if not _mongo_configured() or _mongo_restored_once:
         return
     _mongo_restored_once = True
@@ -437,6 +443,7 @@ def restore_mongo_snapshot_if_configured() -> None:
             check_conn.close()
         if quick_check.lower() != "ok":
             raise BotConfigError(f"Downloaded SQLite snapshot failed integrity check: {quick_check}")
+        _mongo_snapshot_restored = True
         _mongo_last_synced_fingerprint = (stat.st_mtime_ns, stat.st_size)
         logger.info("Restored database snapshot from MongoDB: %s bytes", len(data))
     except Exception as exc:
@@ -479,19 +486,72 @@ def _cleanup_gridfs_file_id(fs, file_id) -> None:
 
 
 def _upload_sqlite_snapshot(fs, data: bytes):
-    file_id = _new_mongo_file_id()
+    attempts = max(1, MONGO_UPLOAD_RETRY_ATTEMPTS)
+    last_error: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        file_id = _new_mongo_file_id()
+        try:
+            fs.put(
+                data,
+                _id=file_id,
+                filename=f"{MONGO_SNAPSHOT_ID}.sqlite3",
+                contentType="application/vnd.sqlite3",
+                metadata={"snapshot_id": MONGO_SNAPSHOT_ID, "app": APP_NAME},
+            )
+            return file_id
+        except OperationFailure as exc:
+            _cleanup_gridfs_file_id(fs, file_id)
+            if _is_mongo_quota_error(exc):
+                raise
+            last_error = exc
+        except PyMongoError as exc:
+            _cleanup_gridfs_file_id(fs, file_id)
+            last_error = exc
+        except Exception:
+            _cleanup_gridfs_file_id(fs, file_id)
+            raise
+        if attempt < attempts:
+            logger.warning("MongoDB snapshot upload attempt %s/%s failed; retrying: %s", attempt, attempts, last_error)
+            time.sleep(max(0.0, MONGO_UPLOAD_RETRY_DELAY_SECONDS))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("MongoDB snapshot upload failed.")
+
+
+def cleanup_mongo_snapshot_orphans() -> dict[str, int]:
+    """Delete stale snapshot files and chunks before attempting another upload."""
+    if not _mongo_configured():
+        return {"files": 0, "chunks": 0}
+    _, database, fs, state_col = _mongo_objects()
+    if database is None or fs is None or state_col is None:
+        return {"files": 0, "chunks": 0}
+
+    deleted_files = 0
+    deleted_chunks = 0
     try:
-        fs.put(
-            data,
-            _id=file_id,
-            filename=f"{MONGO_SNAPSHOT_ID}.sqlite3",
-            contentType="application/vnd.sqlite3",
-            metadata={"snapshot_id": MONGO_SNAPSHOT_ID, "app": APP_NAME},
-        )
-        return file_id
-    except Exception:
-        _cleanup_gridfs_file_id(fs, file_id)
-        raise
+        state = state_col.find_one({"_id": MONGO_SNAPSHOT_ID}) or {}
+        current_file_id = state.get("file_id")
+        stale_ids = [
+            file_id
+            for file_id in _matching_snapshot_file_ids()
+            if current_file_id is None or file_id != current_file_id
+        ]
+        for file_id in stale_ids:
+            _cleanup_gridfs_file_id(fs, file_id)
+            deleted_files += 1
+
+        live_ids = database["sqlite_snapshots.files"].distinct("_id")
+        result = database["sqlite_snapshots.chunks"].delete_many({"files_id": {"$nin": live_ids}})
+        deleted_chunks = int(getattr(result, "deleted_count", 0) or 0)
+        if deleted_files or deleted_chunks:
+            logger.warning(
+                "Removed stale MongoDB snapshot storage before upload: files=%s orphan_chunks=%s",
+                deleted_files,
+                deleted_chunks,
+            )
+    except Exception as exc:
+        logger.warning("Could not fully clean stale MongoDB snapshot storage before upload: %s", exc)
+    return {"files": deleted_files, "chunks": deleted_chunks}
 
 
 def _replace_snapshot_under_quota(fs, state_col, data: bytes, old_file_id):
@@ -18595,7 +18655,18 @@ async def web_startup() -> None:
     finally:
         _mongo_sync_suspended = False
     validate_config()
-    sync_db_to_mongo(force=True)
+    cleanup_mongo_snapshot_orphans()
+    initial_sync_failed = False
+    try:
+        sync_db_to_mongo(force=True)
+    except Exception:
+        # A verified MongoDB snapshot is already restored locally. A temporary
+        # upload timeout must not take the whole bot offline; normal commit syncs
+        # and the delayed retry below will persist the compacted copy.
+        if not _mongo_snapshot_restored:
+            raise
+        initial_sync_failed = True
+        logger.exception("Initial MongoDB snapshot sync failed; continuing startup and scheduling a retry.")
     telegram_application = build_application()
     await telegram_application.initialize()
     await set_bot_commands(telegram_application)
@@ -18618,6 +18689,8 @@ async def web_startup() -> None:
     payment_background_task = asyncio.create_task(payment_watcher(telegram_application), name="payment_watcher")
     marketplace_background_task.add_done_callback(_background_task_done("Marketplace watcher"))
     payment_background_task.add_done_callback(_background_task_done("Payment watcher"))
+    if initial_sync_failed:
+        request_mongo_sync(force=True)
     logger.info("Background watchers started")
 
 

@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from pymongo.errors import OperationFailure
+from pymongo.errors import NetworkTimeout, OperationFailure
 
 import bot
 
@@ -23,6 +23,7 @@ class FakeCollection:
 
     def delete_many(self, query):
         self.deleted_chunks.append(query)
+        return type("DeleteResult", (), {"deleted_count": 0})()
 
     def delete_one(self, query):
         target = query.get("_id")
@@ -76,6 +77,14 @@ class FakeGridFS:
     def delete(self, file_id):
         self.deleted.append(file_id)
         self.database["sqlite_snapshots.files"].delete_one({"_id": file_id})
+
+
+class TimeoutThenSuccessGridFS(FakeGridFS):
+    def put(self, data, **kwargs):
+        self.put_calls += 1
+        if self.put_calls == 1:
+            raise NetworkTimeout("temporary GridFS read timeout")
+        return super().put(data, **kwargs)
 
 
 class QuotaIndexCollection(FakeCollection):
@@ -141,6 +150,12 @@ def main() -> None:
         _client, connected_db, _fs, connected_state = bot._mongo_objects()
         assert connected_db.name == "quota_test"
         assert isinstance(connected_state, QuotaIndexCollection)
+
+        timeout_database = FakeDatabase()
+        timeout_filesystem = TimeoutThenSuccessGridFS(timeout_database)
+        uploaded_id = bot._upload_sqlite_snapshot(timeout_filesystem, b"retry-me")
+        assert uploaded_id is not None
+        assert timeout_filesystem.put_calls == 3, timeout_filesystem.put_calls
 
         bot.MONGO_ENABLED = True
         bot.DB_PATH = path
