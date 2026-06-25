@@ -58,6 +58,7 @@ from telegram.error import RetryAfter, TelegramError
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Header
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 import uvicorn
+from native_mongo_store import NativeMongoStore
 try:
     import aiohttp
 except ImportError:  # optional; requirements.txt includes it, but keep local upgrades safe
@@ -122,11 +123,18 @@ TOKENFETCHER_FILENAME_SETTING = "tokenfetcher_filename"
 MONGO_URI = (os.getenv("MONGO_URI", "").strip() or os.getenv("MONGODB_URI", "").strip())
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "auto").strip().lower() or "auto"
 if STORAGE_BACKEND in {"auto", "default"}:
-    MONGO_ENABLED = bool(MONGO_URI)
-elif STORAGE_BACKEND in {"mongo", "mongodb"}:
-    MONGO_ENABLED = True
+    MONGO_NATIVE_ENABLED = bool(MONGO_URI)
+    MONGO_SNAPSHOT_ENABLED = False
+elif STORAGE_BACKEND in {"mongo", "mongodb", "mongo_native", "mongodb_native", "native_mongo"}:
+    MONGO_NATIVE_ENABLED = True
+    MONGO_SNAPSHOT_ENABLED = False
+elif STORAGE_BACKEND in {"mongo_snapshot", "mongodb_snapshot", "legacy_mongo"}:
+    MONGO_NATIVE_ENABLED = False
+    MONGO_SNAPSHOT_ENABLED = True
 else:
-    MONGO_ENABLED = False
+    MONGO_NATIVE_ENABLED = False
+    MONGO_SNAPSHOT_ENABLED = False
+MONGO_ENABLED = MONGO_NATIVE_ENABLED or MONGO_SNAPSHOT_ENABLED
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "").strip() or "upi_autopay_bot"
 MONGO_STATE_COLLECTION = os.getenv("MONGO_STATE_COLLECTION", "bot_state").strip() or "bot_state"
 MONGO_SNAPSHOT_ID = os.getenv("MONGO_SNAPSHOT_ID", "upi_autopay_main").strip() or "upi_autopay_main"
@@ -142,8 +150,9 @@ MONGO_SOCKET_TIMEOUT_MS = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000"))
 MONGO_UPLOAD_RETRY_ATTEMPTS = int(os.getenv("MONGO_UPLOAD_RETRY_ATTEMPTS", "2"))
 MONGO_UPLOAD_RETRY_DELAY_SECONDS = float(os.getenv("MONGO_UPLOAD_RETRY_DELAY_SECONDS", "2"))
 # When MongoDB is enabled, this is only a local runtime cache restored from/synced to MongoDB.
-DB_PATH = os.getenv("DB_PATH", "/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db").strip() or ("/tmp/upi_autopay_bot.db" if MONGO_ENABLED else "upi_autopay_bot.db")
+DB_PATH = os.getenv("DB_PATH", "/tmp/upi_autopay_bot.db" if MONGO_SNAPSHOT_ENABLED else "upi_autopay_bot.db").strip() or ("/tmp/upi_autopay_bot.db" if MONGO_SNAPSHOT_ENABLED else "upi_autopay_bot.db")
 REQUIRE_PERSISTENT_SQLITE = os.getenv("REQUIRE_PERSISTENT_SQLITE", "false").strip().lower() in {"1", "true", "yes", "on"}
+MONGO_NATIVE_COLLECTION_PREFIX = os.getenv("MONGO_NATIVE_COLLECTION_PREFIX", "native_").strip() or "native_"
 
 # Local default: polling. Railway can also run polling. If you want a webhook, set MODE=webhook + WEBHOOK_URL.
 MODE = os.getenv("MODE", "polling").strip().lower()
@@ -325,15 +334,24 @@ _mongo_sync_pending = False
 _mongo_sync_force_pending = False
 _mongo_sync_suspended = False
 _mongo_persistence_failed = False
+_native_mongo_store: NativeMongoStore | None = None
 _admin_poll_tables_ready = False
 
 
 def _mongo_configured() -> bool:
-    return bool(MONGO_ENABLED)
+    return bool(MONGO_SNAPSHOT_ENABLED)
+
+
+def _native_mongo_configured() -> bool:
+    return bool(MONGO_NATIVE_ENABLED)
+
+
+def _any_mongo_configured() -> bool:
+    return bool(MONGO_NATIVE_ENABLED or MONGO_SNAPSHOT_ENABLED)
 
 
 def _mongo_available_or_raise() -> None:
-    if not _mongo_configured():
+    if not _any_mongo_configured():
         return
     if not MONGO_URI:
         raise BotConfigError("STORAGE_BACKEND=mongodb requires MONGO_URI or MONGODB_URI.")
@@ -342,7 +360,7 @@ def _mongo_available_or_raise() -> None:
 
 
 def validate_storage_durability() -> None:
-    if _mongo_configured() or not REQUIRE_PERSISTENT_SQLITE:
+    if _any_mongo_configured() or not REQUIRE_PERSISTENT_SQLITE:
         return
     db_path = os.path.abspath(DB_PATH)
     temp_roots = {
@@ -366,7 +384,7 @@ def _mongo_objects():
     """Return Mongo client/db/GridFS/state collection, creating them lazily."""
     global _mongo_client, _mongo_db, _mongo_fs, _mongo_state_col
     _mongo_available_or_raise()
-    if not _mongo_configured():
+    if not _any_mongo_configured():
         return None, None, None, None
     if _mongo_client is None:
         logger.info("Connecting MongoDB storage backend")
@@ -778,18 +796,79 @@ class MongoSyncedSQLiteConnection(sqlite3.Connection):
 
 
 def close_mongo_storage() -> None:
-    global _mongo_client, _mongo_db, _mongo_fs, _mongo_state_col
+    global _mongo_client, _mongo_db, _mongo_fs, _mongo_state_col, _native_mongo_store
     if _mongo_configured():
         try:
             sync_db_to_mongo(force=True)
         except Exception:
             logger.exception("Final MongoDB database sync failed")
+    if _native_mongo_store is not None:
+        _native_mongo_store.close()
+        _native_mongo_store = None
     if _mongo_client is not None:
         _mongo_client.close()
     _mongo_client = None
     _mongo_db = None
     _mongo_fs = None
     _mongo_state_col = None
+
+
+def _native_mongo_persistence_error(exc: BaseException) -> None:
+    global _mongo_persistence_failed
+    _mongo_persistence_failed = True
+    logger.error("Native MongoDB persistence failed; user mutations are paused: %s", exc)
+
+
+def _native_mongo_persistence_success() -> None:
+    global _mongo_persistence_failed
+    _mongo_persistence_failed = False
+
+
+def initialize_native_mongo_store_before_schema() -> None:
+    global _native_mongo_store
+    if not _native_mongo_configured() or _native_mongo_store is not None:
+        return
+    _client, database, _fs, _state = _mongo_objects()
+    if database is None:
+        raise BotConfigError("Native MongoDB database is unavailable.")
+    _native_mongo_store = NativeMongoStore(
+        database=database,
+        collection_prefix=MONGO_NATIVE_COLLECTION_PREFIX,
+        on_persistence_error=_native_mongo_persistence_error,
+        on_persistence_success=_native_mongo_persistence_success,
+    )
+
+
+def bootstrap_native_mongo_data() -> None:
+    if not _native_mongo_configured() or _native_mongo_store is None:
+        return
+    store = _native_mongo_store
+    legacy_path: str | None = None
+    if store.native_initialized():
+        store.load_native_documents_into_memory()
+        logger.info("Loaded native MongoDB collections into the in-memory SQL compatibility engine.")
+    else:
+        _client, _database, fs, state_collection = _mongo_objects()
+        if fs is not None and state_collection is not None:
+            legacy_path = store.download_legacy_gridfs_snapshot(fs, state_collection, MONGO_SNAPSHOT_ID)
+        try:
+            if legacy_path:
+                counts = store.import_sqlite_file(legacy_path)
+                logger.warning("Migrated legacy SQLite/GridFS snapshot to native MongoDB collections: %s", counts)
+            else:
+                counts = store.initialize_from_memory()
+                logger.info("Initialized empty native MongoDB collections: %s", counts)
+        finally:
+            if legacy_path:
+                try:
+                    os.remove(legacy_path)
+                except OSError:
+                    pass
+        store.load_native_documents_into_memory()
+    integrity = store.validate_critical_integrity()
+    logger.info("Native MongoDB critical-data integrity check passed: %s", integrity["mongo"])
+    store.create_change_tracking()
+    store.sync_suspended = False
 
 
 def parse_admin_ids(raw: str) -> set[int]:
@@ -2108,6 +2187,10 @@ class BotConfigError(RuntimeError):
 
 
 def get_conn() -> sqlite3.Connection:
+    if _native_mongo_configured():
+        if _native_mongo_store is None:
+            raise RuntimeError("Native MongoDB storage has not been initialized yet.")
+        return _native_mongo_store.connection()
     restore_mongo_snapshot_if_configured()
     os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)) or ".", exist_ok=True)
     conn = sqlite3.connect(
@@ -13690,7 +13773,7 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
 async def marketplace_watcher(application: Application) -> None:
     while True:
         try:
-            if _mongo_configured() and _mongo_persistence_failed:
+            if _any_mongo_configured() and _mongo_persistence_failed:
                 await asyncio.sleep(15)
                 continue
             if OFFER_TIMER_REFRESH_ENABLED:
@@ -13866,7 +13949,7 @@ async def payment_watcher(application: Application) -> None:
     next_log_maintenance_at = 0.0
     while True:
         try:
-            if _mongo_configured() and _mongo_persistence_failed:
+            if _any_mongo_configured() and _mongo_persistence_failed:
                 await asyncio.sleep(15)
                 continue
             if time.monotonic() >= next_log_maintenance_at:
@@ -13916,7 +13999,7 @@ async def maintenance_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     checks remain available through /wallet and /loadwallet during maintenance.
     """
     user = update.effective_user
-    if _mongo_configured() and _mongo_persistence_failed:
+    if _any_mongo_configured() and _mongo_persistence_failed:
         message = "⚠️ Bot storage is temporarily unavailable. New actions are paused to prevent data loss. Please contact support."
         if update.callback_query:
             try:
@@ -13970,7 +14053,7 @@ web_app = FastAPI(title=f"{APP_NAME} Admin")
 async def persistence_safety_middleware(request: Request, call_next):
     if (
         request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
-        and _mongo_configured()
+        and _any_mongo_configured()
         and _mongo_persistence_failed
         and request.url.path != "/telegram-webhook"
     ):
@@ -18706,25 +18789,33 @@ async def web_startup() -> None:
     global telegram_application, polling_started, marketplace_background_task, payment_background_task, _mongo_sync_suspended
     validate_storage_durability()
     _mongo_available_or_raise()
-    restore_mongo_snapshot_if_configured()
-    _mongo_sync_suspended = True
-    try:
+    if _native_mongo_configured():
+        initialize_native_mongo_store_before_schema()
         init_db()
-        maintain_payment_verification_logs(compact=True)
-    finally:
-        _mongo_sync_suspended = False
+        bootstrap_native_mongo_data()
+        # Run migrations/backfills once more against imported native documents.
+        init_db()
+    else:
+        restore_mongo_snapshot_if_configured()
+        _mongo_sync_suspended = True
+        try:
+            init_db()
+            maintain_payment_verification_logs(compact=True)
+        finally:
+            _mongo_sync_suspended = False
     validate_config()
-    cleanup_mongo_snapshot_orphans()
     initial_sync_failed = False
-    try:
-        sync_db_to_mongo(force=True)
-    except Exception:
-        # A verified MongoDB snapshot is already restored locally. A temporary
-        # upload timeout can start only in explicit read-only/fail-safe mode.
-        if not _mongo_snapshot_restored or not MONGO_ALLOW_UNSYNCED_STARTUP:
-            raise
-        initial_sync_failed = True
-        logger.exception("Initial MongoDB snapshot sync failed; starting with user actions paused and scheduling a retry.")
+    if _mongo_configured():
+        cleanup_mongo_snapshot_orphans()
+        try:
+            sync_db_to_mongo(force=True)
+        except Exception:
+            # A verified MongoDB snapshot is already restored locally. A temporary
+            # upload timeout can start only in explicit read-only/fail-safe mode.
+            if not _mongo_snapshot_restored or not MONGO_ALLOW_UNSYNCED_STARTUP:
+                raise
+            initial_sync_failed = True
+            logger.exception("Initial MongoDB snapshot sync failed; starting with user actions paused and scheduling a retry.")
     telegram_application = build_application()
     await telegram_application.initialize()
     await set_bot_commands(telegram_application)
@@ -18747,7 +18838,7 @@ async def web_startup() -> None:
     payment_background_task = asyncio.create_task(payment_watcher(telegram_application), name="payment_watcher")
     marketplace_background_task.add_done_callback(_background_task_done("Marketplace watcher"))
     payment_background_task.add_done_callback(_background_task_done("Payment watcher"))
-    if initial_sync_failed:
+    if initial_sync_failed and _mongo_configured():
         request_mongo_sync(force=True)
     logger.info("Background watchers started")
 

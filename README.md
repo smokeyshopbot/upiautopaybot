@@ -207,7 +207,7 @@ BINANCE_RECV_WINDOW_MS=5000
 
 ## MongoDB live deployment
 
-This build is MongoDB-ready for live deployment. With `STORAGE_BACKEND=auto`, setting `MONGO_URI` makes MongoDB the primary persistent store; leaving `MONGO_URI` empty uses a normal local SQLite database for testing. You do **not** need a Railway Volume or any persistent disk when MongoDB is configured.
+This build uses native MongoDB persistence in production. Users, wallets, QR orders, deposits, ledgers, disputes, and logs are stored as individual MongoDB documents. There is no persistent SQLite file, GridFS database snapshot, or Railway Volume.
 
 Recommended production variables:
 
@@ -215,10 +215,9 @@ Recommended production variables:
 STORAGE_BACKEND=mongodb
 MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
 MONGO_DB_NAME=upi_autopay_bot
+MONGO_NATIVE_COLLECTION_PREFIX=native_
 MONGO_STATE_COLLECTION=bot_state
 MONGO_SNAPSHOT_ID=upi_autopay_main
-MONGO_SYNC_ON_COMMIT=true
-DB_PATH=/tmp/upi_autopay_bot.db
 MODE=polling
 PORT=8080
 ADMIN_COOKIE_SECURE=true
@@ -226,26 +225,11 @@ ADMIN_COOKIE_SECURE=true
 
 How it works:
 
-- MongoDB is the persistent live store.
-- The bot restores a temporary local runtime database from MongoDB on startup.
-- After commits, the bot syncs the latest database snapshot back to MongoDB.
-
-## Recommended Railway production storage
-
-For this SQL-heavy bot, the safest production layout is SQLite on a Railway Volume:
-
-1. Attach one Railway Volume to the bot service at `/data`.
-2. Run `python scripts/migrate_mongo_snapshot_to_volume.py` once while `MONGO_URI` is still configured.
-3. Then set:
-
-```env
-STORAGE_BACKEND=sqlite
-DB_PATH=/data/upi_autopay_bot.db
-REQUIRE_PERSISTENT_SQLITE=true
-```
-
-Keep one service replica because Railway Volumes cannot be shared by replicas. Enable Railway Volume backups. The migration tool reads MongoDB without modifying it, integrity-checks the SQLite snapshot, and atomically writes it to the mounted volume.
-- This keeps all existing bot/admin behavior intact while removing the need for local persistent storage.
+- MongoDB is the only persistent live store.
+- Each committed row change is synchronously written to its MongoDB collection.
+- The relational query engine is memory-only and creates no `.db` file.
+- On the first native-Mongo startup, the bot automatically imports the current valid legacy GridFS snapshot, then stops creating snapshots.
+- A MongoDB write failure rolls back the bot action and pauses further mutations instead of accepting data only in temporary storage.
 
 For local-only testing without MongoDB, use:
 
@@ -255,11 +239,23 @@ MONGO_URI=
 DB_PATH=upi_autopay_bot.db
 ```
 
-If you already have an existing local `upi_autopay_bot.db` and want to move it to MongoDB, place it beside `bot.py`, set `STORAGE_BACKEND=mongodb` and `MONGO_URI`, then start the bot once. If MongoDB has no saved snapshot yet, the bot will create the MongoDB snapshot from that local database.
+Existing GridFS-backed deployments migrate automatically on first startup when the `native_meta` collection is not initialized.
+
+After verifying users, wallets, earnings, QR history, and deposits in the native deployment, legacy GridFS storage can be removed once with:
+
+```env
+CONFIRM_DELETE_LEGACY_GRIDFS=yes
+```
+
+```bash
+python scripts/delete_legacy_gridfs_after_native_migration.py
+```
+
+Remove the confirmation variable afterward. The cleanup script refuses to run unless native migration is marked complete and key native collections contain data.
 
 ## Railway deployment
 
-Set the MongoDB variables above in Railway. Do not add a Railway Volume unless you intentionally want local SQLite mode.
+Set the MongoDB variables above in Railway. No Railway Volume is needed.
 
 ## Important
 
