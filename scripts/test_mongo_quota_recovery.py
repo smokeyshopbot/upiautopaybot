@@ -131,6 +131,7 @@ def main() -> None:
     original_uri = bot.MONGO_URI
     original_db_path = bot.DB_PATH
     original_fingerprint = bot._mongo_last_synced_fingerprint
+    original_quota_recovery = bot.MONGO_QUOTA_RECOVERY_ENABLED
     original_client_factory = bot.MongoClient
     original_gridfs_factory = bot.gridfs.GridFS
     original_client = bot._mongo_client
@@ -144,6 +145,7 @@ def main() -> None:
         bot._mongo_fs = None
         bot._mongo_state_col = None
         bot.MONGO_ENABLED = True
+        bot.MONGO_QUOTA_RECOVERY_ENABLED = True
         bot.MONGO_URI = "mongodb://quota-test"
         bot.MongoClient = FakeClient
         bot.gridfs.GridFS = lambda database, collection: FakeGridFS(database)
@@ -177,6 +179,7 @@ def main() -> None:
         bot._mongo_fs = original_fs
         bot._mongo_state_col = original_state
         bot.MONGO_ENABLED = original_enabled
+        bot.MONGO_QUOTA_RECOVERY_ENABLED = original_quota_recovery
         bot.MONGO_URI = original_uri
         bot.DB_PATH = original_db_path
         bot._mongo_last_synced_fingerprint = original_fingerprint

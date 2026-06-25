@@ -76,6 +76,7 @@ except ImportError:  # MongoDB is optional unless STORAGE_BACKEND=mongodb or MON
 
 from telegram.ext import (
     Application,
+    ApplicationHandlerStop,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
@@ -131,7 +132,9 @@ MONGO_SNAPSHOT_ID = os.getenv("MONGO_SNAPSHOT_ID", "upi_autopay_main").strip() o
 MONGO_SYNC_ON_COMMIT = os.getenv("MONGO_SYNC_ON_COMMIT", "true").strip().lower() in {"1", "true", "yes", "on"}
 MONGO_SYNC_DEBOUNCE_SECONDS = float(os.getenv("MONGO_SYNC_DEBOUNCE_SECONDS", "2"))
 MONGO_TLS_ALLOW_INVALID_CERTIFICATES = os.getenv("MONGO_TLS_ALLOW_INVALID_CERTIFICATES", "false").strip().lower() in {"1", "true", "yes", "on"}
-MONGO_QUOTA_RECOVERY_ENABLED = os.getenv("MONGO_QUOTA_RECOVERY_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+MONGO_QUOTA_RECOVERY_ENABLED = os.getenv("MONGO_QUOTA_RECOVERY_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+MONGO_ORPHAN_CLEANUP_ENABLED = os.getenv("MONGO_ORPHAN_CLEANUP_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+MONGO_ALLOW_UNSYNCED_STARTUP = os.getenv("MONGO_ALLOW_UNSYNCED_STARTUP", "false").strip().lower() in {"1", "true", "yes", "on"}
 MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "15000"))
 MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "15000"))
 MONGO_SOCKET_TIMEOUT_MS = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000"))
@@ -319,6 +322,7 @@ _mongo_sync_task: asyncio.Task | None = None
 _mongo_sync_pending = False
 _mongo_sync_force_pending = False
 _mongo_sync_suspended = False
+_mongo_persistence_failed = False
 _admin_poll_tables_ready = False
 
 
@@ -520,7 +524,7 @@ def _upload_sqlite_snapshot(fs, data: bytes):
 
 def cleanup_mongo_snapshot_orphans() -> dict[str, int]:
     """Delete stale snapshot files and chunks before attempting another upload."""
-    if not _mongo_configured():
+    if not _mongo_configured() or not MONGO_ORPHAN_CLEANUP_ENABLED:
         return {"files": 0, "chunks": 0}
     _, database, fs, state_col = _mongo_objects()
     if database is None or fs is None or state_col is None:
@@ -605,7 +609,7 @@ def sync_db_to_mongo(force: bool = False) -> None:
     Called after commits in MongoDB mode. The function is synchronous on purpose so a
     successful bot/admin action is durable in MongoDB before the handler returns.
     """
-    global _mongo_last_synced_fingerprint, _mongo_sync_in_progress
+    global _mongo_last_synced_fingerprint, _mongo_sync_in_progress, _mongo_persistence_failed
     if not _mongo_configured() or (not MONGO_SYNC_ON_COMMIT and not force):
         return
     if _mongo_sync_in_progress:
@@ -659,32 +663,37 @@ def sync_db_to_mongo(force: bool = False) -> None:
                     fs.delete(old_file_id)
                 except Exception:
                     logger.debug("Could not delete previous MongoDB SQLite snapshot", exc_info=True)
-            # Remove stale/orphaned generations for this snapshot ID as well. A
-            # crash between GridFS upload and bot_state update can otherwise leave
-            # hundreds of megabytes permanently stranded in .files/.chunks.
-            try:
-                stale_files = _mongo_db["sqlite_snapshots.files"].find(
-                    {
-                        "_id": {"$ne": file_id},
-                        "$or": [
-                            {"metadata.snapshot_id": MONGO_SNAPSHOT_ID},
-                            {"filename": f"{MONGO_SNAPSHOT_ID}.sqlite3"},
-                        ],
-                    },
-                    {"_id": 1},
-                )
-                for stale in stale_files:
-                    fs.delete(stale["_id"])
-            except Exception:
-                logger.debug("Could not delete orphaned MongoDB SQLite snapshots", exc_info=True)
+            if MONGO_ORPHAN_CLEANUP_ENABLED:
+                # Optional because stale generations may be valuable recovery
+                # evidence after an interrupted deployment.
+                try:
+                    stale_files = _mongo_db["sqlite_snapshots.files"].find(
+                        {
+                            "_id": {"$ne": file_id},
+                            "$or": [
+                                {"metadata.snapshot_id": MONGO_SNAPSHOT_ID},
+                                {"filename": f"{MONGO_SNAPSHOT_ID}.sqlite3"},
+                            ],
+                        },
+                        {"_id": 1},
+                    )
+                    for stale in stale_files:
+                        fs.delete(stale["_id"])
+                except Exception:
+                    logger.debug("Could not delete orphaned MongoDB SQLite snapshots", exc_info=True)
             _mongo_last_synced_fingerprint = fingerprint
+            _mongo_persistence_failed = False
             duration = time.monotonic() - started
             if duration >= 1.0:
                 logger.info("Synced database snapshot to MongoDB: %s bytes in %.2fs", len(data), duration)
             else:
                 logger.debug("Synced database snapshot to MongoDB: %s bytes in %.2fs", len(data), duration)
         except PyMongoError as exc:
+            _mongo_persistence_failed = True
             raise RuntimeError(f"MongoDB database sync failed: {exc}") from exc
+        except Exception:
+            _mongo_persistence_failed = True
+            raise
         finally:
             _mongo_sync_in_progress = False
 
@@ -13664,6 +13673,9 @@ async def notify_admin_order_status_change(bot, result: dict) -> tuple[int, int]
 async def marketplace_watcher(application: Application) -> None:
     while True:
         try:
+            if _mongo_configured() and _mongo_persistence_failed:
+                await asyncio.sleep(15)
+                continue
             if OFFER_TIMER_REFRESH_ENABLED:
                 for row in list_open_orders_for_timer_refresh(limit=100):
                     await refresh_open_offer_timer_once(application.bot, str(row["public_id"]), row)
@@ -13837,6 +13849,9 @@ async def payment_watcher(application: Application) -> None:
     next_log_maintenance_at = 0.0
     while True:
         try:
+            if _mongo_configured() and _mongo_persistence_failed:
+                await asyncio.sleep(15)
+                continue
             if time.monotonic() >= next_log_maintenance_at:
                 await asyncio.to_thread(maintain_payment_verification_logs, compact=False)
                 next_log_maintenance_at = time.monotonic() + 6 * 60 * 60
@@ -13884,6 +13899,16 @@ async def maintenance_guard(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     checks remain available through /wallet and /loadwallet during maintenance.
     """
     user = update.effective_user
+    if _mongo_configured() and _mongo_persistence_failed:
+        message = "⚠️ Bot storage is temporarily unavailable. New actions are paused to prevent data loss. Please contact support."
+        if update.callback_query:
+            try:
+                await update.callback_query.answer(message, show_alert=True)
+            except TelegramError:
+                pass
+        elif update.message:
+            await update.message.reply_text(message)
+        raise ApplicationHandlerStop
     if not user or not maintenance_mode_enabled():
         return
     if is_admin(int(user.id)):
@@ -13922,6 +13947,22 @@ polling_started = False
 marketplace_background_task: asyncio.Task | None = None
 payment_background_task: asyncio.Task | None = None
 web_app = FastAPI(title=f"{APP_NAME} Admin")
+
+
+@web_app.middleware("http")
+async def persistence_safety_middleware(request: Request, call_next):
+    if (
+        request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+        and _mongo_configured()
+        and _mongo_persistence_failed
+        and request.url.path != "/telegram-webhook"
+    ):
+        return Response(
+            content="Bot storage is unavailable. Changes are paused to prevent data loss.",
+            status_code=503,
+            media_type="text/plain",
+        )
+    return await call_next(request)
 
 
 class ApiFlowError(Exception):
@@ -18661,12 +18702,11 @@ async def web_startup() -> None:
         sync_db_to_mongo(force=True)
     except Exception:
         # A verified MongoDB snapshot is already restored locally. A temporary
-        # upload timeout must not take the whole bot offline; normal commit syncs
-        # and the delayed retry below will persist the compacted copy.
-        if not _mongo_snapshot_restored:
+        # upload timeout can start only in explicit read-only/fail-safe mode.
+        if not _mongo_snapshot_restored or not MONGO_ALLOW_UNSYNCED_STARTUP:
             raise
         initial_sync_failed = True
-        logger.exception("Initial MongoDB snapshot sync failed; continuing startup and scheduling a retry.")
+        logger.exception("Initial MongoDB snapshot sync failed; starting with user actions paused and scheduling a retry.")
     telegram_application = build_application()
     await telegram_application.initialize()
     await set_bot_commands(telegram_application)
