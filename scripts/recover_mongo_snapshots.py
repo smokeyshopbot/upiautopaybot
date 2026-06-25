@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import tempfile
 from collections import defaultdict
 from datetime import datetime
@@ -16,6 +17,10 @@ from pathlib import Path
 
 import gridfs
 from pymongo import MongoClient
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import bot
 
